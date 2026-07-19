@@ -7,6 +7,8 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 ## Features
 
 - Notes list + editor with autosave, full-text search, pinning, word/char count
+- **Rich formatting** with Markdown: toolbar (bold, italic, lists, quotes,
+  code, links…) and a Write/Preview switch; notes stay portable plain text
 - **Tags** (comma-separated in the editor; search with `#tag`)
 - **Glossary notes**: lines of `source term = translation` render as a
   two-column table — click a row to copy the translation

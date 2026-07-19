@@ -8,6 +8,7 @@ import {
   loadSettings,
   saveSettings,
 } from "./storage.js";
+import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,15 +20,18 @@ const ui = {
   emptyHint: $("empty-hint"),
   editorView: $("editor-view"),
   back: $("back"),
-  glossary: $("glossary"),
-  tableToggle: $("table-toggle"),
+  modeWrite: $("mode-write"),
+  modePreview: $("mode-preview"),
   pin: $("pin"),
   copyNote: $("copy-note"),
   delete: $("delete"),
   tags: $("tags"),
   lang: $("lang"),
+  glossary: $("glossary"),
+  toolbar: $("toolbar"),
+  glossaryHint: $("glossary-hint"),
   editor: $("editor"),
-  glossaryTable: $("glossary-table"),
+  preview: $("preview"),
   counts: $("counts"),
   saveState: $("save-state"),
   settingsView: $("settings-view"),
@@ -48,17 +52,39 @@ const ui = {
 let notes = {};
 let settings = { syncEnabled: false };
 let currentId = null;
+let mode = "write";
 let saveTimer = null;
 let deleteArmedUntil = 0;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
 
-// ---- Helpers ----
+const PLACEHOLDER_NOTE =
+  "Type your note…\n\n**bold**  *italic*  `code`\n- list item\n# heading";
+const PLACEHOLDER_GLOSSARY =
+  "source term = translation\nanother term = its translation\n\nLines without “=” become section headers.";
+
+// ---- Small helpers ----
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const ICON_PIN =
+  "M8 2.4l1.7 3.4 3.8.6-2.8 2.7.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.7 3.8-.6z";
+const ICON_BOOK =
+  "M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5";
+
+function svgIcon(pathData, filled) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", pathData);
+  if (filled) path.setAttribute("fill", "currentColor");
+  svg.append(path);
+  return svg;
+}
 
 function titleOf(note) {
   const firstLine = note.body.split("\n").find((line) => line.trim() !== "");
-  return firstLine ? firstLine.trim().slice(0, 80) : "Untitled";
+  return firstLine ? firstLine.trim().replace(/^#+\s*/, "").slice(0, 80) : "Untitled";
 }
 
 function snippetOf(note) {
@@ -109,16 +135,19 @@ function renderList() {
     if (note.pinned) {
       const pin = document.createElement("span");
       pin.className = "note-pin";
-      pin.textContent = "★";
+      pin.append(svgIcon(ICON_PIN, true));
       title.append(pin);
     }
     if (note.glossary) {
       const mark = document.createElement("span");
       mark.className = "note-pin";
-      mark.textContent = "📖";
+      mark.append(svgIcon(ICON_BOOK));
       title.append(mark);
     }
-    title.append(titleOf(note));
+    const titleText = document.createElement("span");
+    titleText.className = "t-text";
+    titleText.textContent = titleOf(note);
+    title.append(titleText);
 
     const snippet = document.createElement("span");
     snippet.className = "note-snippet";
@@ -126,7 +155,9 @@ function renderList() {
 
     const meta = document.createElement("span");
     meta.className = "note-meta";
-    meta.textContent = relativeTime(note.updatedAt);
+    const time = document.createElement("span");
+    time.textContent = relativeTime(note.updatedAt);
+    meta.append(time);
     for (const tag of (note.tags || []).slice(0, 3)) {
       const chip = document.createElement("button");
       chip.className = "tag-chip";
@@ -142,24 +173,43 @@ function renderList() {
   ui.emptyHint.hidden = Object.keys(notes).length > 0;
 }
 
-// ---- Editor view ----
+// ---- Editor: modes ----
 
-function renderCounts() {
-  const text = ui.editor.value;
-  const words = text.split(/\s+/).filter(Boolean).length;
-  ui.counts.textContent = `${words} words · ${text.length} chars`;
+function isGlossary() {
+  return Boolean(currentId && notes[currentId] && notes[currentId].glossary);
 }
 
-function renderGlossaryControls(note) {
-  ui.glossary.textContent = note.glossary ? "📖" : "📄";
-  ui.glossary.title = note.glossary ? "Glossary note (click to unmark)" : "Mark as glossary";
-  ui.glossary.classList.toggle("pinned", Boolean(note.glossary));
-  ui.tableToggle.hidden = !note.glossary;
-  if (!note.glossary) showTable(false);
+function setMode(next) {
+  mode = next;
+  const write = mode === "write";
+  ui.editor.hidden = !write;
+  ui.preview.hidden = write;
+  ui.toolbar.hidden = !write || isGlossary();
+  ui.glossaryHint.hidden = !write || !isGlossary();
+  ui.modeWrite.classList.toggle("active", write);
+  ui.modePreview.classList.toggle("active", !write);
+  if (write) {
+    ui.editor.focus();
+  } else {
+    flushSave();
+    renderPreview();
+  }
+}
+
+function renderPreview() {
+  const glossary = isGlossary();
+  ui.preview.classList.toggle("md", !glossary);
+  if (glossary) {
+    ui.preview.textContent = "";
+    renderGlossaryTable(ui.preview);
+  } else {
+    // Safe: renderMarkdown HTML-escapes all input before adding its own tags.
+    ui.preview.innerHTML = renderMarkdown(ui.editor.value);
+  }
 }
 
 // Glossary lines are "source = translation" (or tab-separated). Lines
-// without a separator become section headers in the table.
+// without a separator become section headers.
 function parseGlossary(body) {
   return body
     .split("\n")
@@ -175,8 +225,7 @@ function parseGlossary(body) {
     });
 }
 
-function renderGlossaryTable() {
-  ui.glossaryTable.textContent = "";
+function renderGlossaryTable(container) {
   const rows = parseGlossary(ui.editor.value);
   for (const row of rows) {
     const el = document.createElement("div");
@@ -197,22 +246,26 @@ function renderGlossaryTable() {
         setTimeout(() => el.classList.remove("copied"), 700);
       });
     }
-    ui.glossaryTable.append(el);
+    container.append(el);
   }
   if (!rows.length) {
     const hint = document.createElement("p");
     hint.className = "hint";
     hint.textContent = "One pair per line: source term = translation";
-    ui.glossaryTable.append(hint);
+    container.append(hint);
   }
 }
 
-function showTable(on) {
-  ui.editor.hidden = on;
-  ui.glossaryTable.hidden = !on;
-  ui.tableToggle.textContent = on ? "✎" : "⊞";
-  ui.tableToggle.title = on ? "Edit" : "Table view";
-  if (on) renderGlossaryTable();
+function renderGlossaryControls(note) {
+  ui.glossary.classList.toggle("on", Boolean(note.glossary));
+  ui.glossary.setAttribute("aria-pressed", String(Boolean(note.glossary)));
+  ui.editor.placeholder = note.glossary ? PLACEHOLDER_GLOSSARY : PLACEHOLDER_NOTE;
+}
+
+function renderCounts() {
+  const text = ui.editor.value;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  ui.counts.textContent = `${words} words · ${text.length} chars`;
 }
 
 function applyLang(value) {
@@ -240,15 +293,90 @@ function openEditor(id) {
   ui.tags.value = (note.tags || []).join(", ");
   ui.lang.value = note.lang || "";
   applyLang(note.lang);
-  ui.pin.textContent = note.pinned ? "★" : "☆";
-  ui.pin.classList.toggle("pinned", note.pinned);
+  ui.pin.classList.toggle("pinned", Boolean(note.pinned));
   renderGlossaryControls(note);
-  showTable(Boolean(note.glossary));
   showView("editor");
   ui.saveState.textContent = "";
   renderCounts();
-  if (!note.glossary) ui.editor.focus();
+  setMode(note.glossary && note.body.trim() ? "preview" : "write");
 }
+
+// ---- Formatting toolbar ----
+
+function notifyEdited() {
+  ui.editor.dispatchEvent(new Event("input"));
+}
+
+function applyWrap(before, after = before) {
+  const el = ui.editor;
+  const { selectionStart: s, selectionEnd: e, value } = el;
+  const sel = value.slice(s, e) || "text";
+  el.setRangeText(before + sel + after, s, e);
+  el.selectionStart = s + before.length;
+  el.selectionEnd = s + before.length + sel.length;
+  el.focus();
+  notifyEdited();
+}
+
+function applyLink() {
+  const el = ui.editor;
+  const { selectionStart: s, selectionEnd: e, value } = el;
+  const sel = value.slice(s, e) || "link text";
+  const url = "https://";
+  el.setRangeText(`[${sel}](${url})`, s, e);
+  const urlStart = s + 1 + sel.length + 2;
+  el.selectionStart = urlStart;
+  el.selectionEnd = urlStart + url.length;
+  el.focus();
+  notifyEdited();
+}
+
+function applyLinePrefix(transform) {
+  const el = ui.editor;
+  const { value } = el;
+  const start = value.lastIndexOf("\n", el.selectionStart - 1) + 1;
+  let end = value.indexOf("\n", el.selectionEnd);
+  if (end === -1) end = value.length;
+  const replaced = value
+    .slice(start, end)
+    .split("\n")
+    .map(transform)
+    .join("\n");
+  el.setRangeText(replaced, start, end);
+  el.selectionStart = start;
+  el.selectionEnd = start + replaced.length;
+  el.focus();
+  notifyEdited();
+}
+
+const toolbarActions = {
+  bold: () => applyWrap("**"),
+  italic: () => applyWrap("*"),
+  strike: () => applyWrap("~~"),
+  heading: () =>
+    applyLinePrefix((line) =>
+      line.startsWith("## ") ? line.slice(3) : `## ${line}`
+    ),
+  ul: () =>
+    applyLinePrefix((line) =>
+      line.startsWith("- ") ? line.slice(2) : `- ${line}`
+    ),
+  ol: () =>
+    applyLinePrefix((line, i) => {
+      const stripped = line.replace(/^\d+[.)]\s+/, "");
+      return stripped === line ? `${i + 1}. ${line}` : stripped;
+    }),
+  quote: () =>
+    applyLinePrefix((line) =>
+      line.startsWith("> ") ? line.slice(2) : `> ${line}`
+    ),
+  code: () => {
+    const { selectionStart: s, selectionEnd: e, value } = ui.editor;
+    if (value.slice(s, e).includes("\n")) applyWrap("```\n", "\n```");
+    else applyWrap("`");
+  },
+  link: applyLink,
+};
 
 // ---- Saving ----
 
@@ -263,12 +391,23 @@ async function flushSave() {
   saveTimer = null;
   if (!currentId) return;
   const note = notes[currentId];
-  note.body = ui.editor.value;
-  note.tags = ui.tags.value
+  const body = ui.editor.value;
+  const tags = ui.tags.value
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
-  note.lang = ui.lang.value.trim();
+  const lang = ui.lang.value.trim();
+  const dirty =
+    note.body !== body ||
+    note.lang !== lang ||
+    JSON.stringify(note.tags || []) !== JSON.stringify(tags);
+  if (!dirty) {
+    ui.saveState.textContent = "";
+    return;
+  }
+  note.body = body;
+  note.tags = tags;
+  note.lang = lang;
   note.updatedAt = Date.now();
   await saveNote(note);
   ui.saveState.textContent = "Saved";
@@ -278,14 +417,15 @@ async function flushSave() {
 
 function disarmDelete() {
   deleteArmedUntil = 0;
-  ui.delete.textContent = "🗑";
+  ui.delete.classList.remove("armed");
   ui.delete.title = "Delete note";
 }
 
 async function handleDelete() {
   if (Date.now() > deleteArmedUntil) {
     deleteArmedUntil = Date.now() + 3000;
-    ui.delete.textContent = "Sure?";
+    ui.delete.classList.add("armed");
+    ui.delete.title = "Click again to delete";
     setTimeout(() => {
       if (Date.now() > deleteArmedUntil) disarmDelete();
     }, 3200);
@@ -304,6 +444,7 @@ async function handleDelete() {
 
 function renderStorageBadge() {
   ui.storageNote.textContent = settings.syncEnabled ? "synced" : "local-only";
+  ui.storageNote.classList.toggle("synced", Boolean(settings.syncEnabled));
   ui.storageNote.title = settings.syncEnabled
     ? "Notes are mirrored through Firefox Sync (end-to-end encrypted)."
     : "All notes stay in this browser. Nothing is sent anywhere.";
@@ -425,6 +566,9 @@ ui.back.addEventListener("click", async () => {
 });
 ui.settingsBack.addEventListener("click", openList);
 
+ui.modeWrite.addEventListener("click", () => setMode("write"));
+ui.modePreview.addEventListener("click", () => setMode("preview"));
+
 ui.editor.addEventListener("input", () => {
   renderCounts();
   scheduleSave();
@@ -435,10 +579,29 @@ ui.lang.addEventListener("input", () => {
   scheduleSave();
 });
 
+ui.editor.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || isGlossary()) return;
+  const key = event.key.toLowerCase();
+  if (key === "b") {
+    event.preventDefault();
+    toolbarActions.bold();
+  } else if (key === "i") {
+    event.preventDefault();
+    toolbarActions.italic();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!ui.editorView.hidden) ui.back.click();
   else if (!ui.settingsView.hidden) openList();
+});
+
+ui.toolbar.addEventListener("click", (event) => {
+  const button = event.target.closest(".tool");
+  if (button && toolbarActions[button.dataset.action]) {
+    toolbarActions[button.dataset.action]();
+  }
 });
 
 ui.glossary.addEventListener("click", async () => {
@@ -447,12 +610,7 @@ ui.glossary.addEventListener("click", async () => {
   note.updatedAt = Date.now();
   await saveNote(note);
   renderGlossaryControls(note);
-});
-
-ui.tableToggle.addEventListener("click", async () => {
-  const showingTable = ui.editor.hidden;
-  if (!showingTable) await flushSave();
-  showTable(!showingTable);
+  setMode(mode); // refresh toolbar/hint visibility and preview content
 });
 
 ui.pin.addEventListener("click", async () => {
@@ -460,14 +618,13 @@ ui.pin.addEventListener("click", async () => {
   note.pinned = !note.pinned;
   note.updatedAt = Date.now();
   await saveNote(note);
-  ui.pin.textContent = note.pinned ? "★" : "☆";
   ui.pin.classList.toggle("pinned", note.pinned);
 });
 
 ui.copyNote.addEventListener("click", async () => {
   await navigator.clipboard.writeText(ui.editor.value);
-  ui.copyNote.textContent = "✓";
-  setTimeout(() => (ui.copyNote.textContent = "⧉"), 1200);
+  ui.copyNote.classList.add("ok");
+  setTimeout(() => ui.copyNote.classList.remove("ok"), 800);
 });
 
 ui.delete.addEventListener("click", handleDelete);
@@ -504,7 +661,7 @@ onExternalChange(async () => {
     if (document.activeElement !== ui.editor && ui.editor.value !== note.body) {
       ui.editor.value = note.body;
       renderCounts();
-      if (!ui.glossaryTable.hidden) renderGlossaryTable();
+      if (mode === "preview") renderPreview();
     }
   } else if (!ui.listView.hidden) {
     renderList();

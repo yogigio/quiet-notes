@@ -7,25 +7,44 @@
 </head>
 <body>
   <header id="topbar">
-    <input id="search" type="search" placeholder="Search notes… (#tag filters by tag)" autocomplete="off">
-    <button id="new-note" class="icon-btn" title="New note">+</button>
+    <div id="search-wrap">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
+      <input id="search" type="search" placeholder="Search, or #tag" autocomplete="off">
+    </div>
+    <button id="new-note" class="icon-btn primary" title="New note" aria-label="New note">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+    </button>
   </header>
 
   <main id="list-view">
     <ul id="note-list"></ul>
-    <p id="empty-hint" hidden>No notes yet.<br>Click <strong>+</strong> to create your first note.</p>
+    <div id="empty-hint" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg>
+      <p>No notes yet.<br>Click <strong>+</strong> to create your first note.</p>
+    </div>
   </main>
 
   <main id="editor-view" hidden>
     <div id="editor-bar">
-      <button id="back" class="icon-btn" title="Back to list (Esc)">←</button>
+      <button id="back" class="icon-btn" title="Back to list (Esc)" aria-label="Back to list">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
+      </button>
+      <div id="mode-switch" role="group" aria-label="Editor mode">
+        <button id="mode-write" class="seg active">Write</button>
+        <button id="mode-preview" class="seg">Preview</button>
+      </div>
       <span class="spacer"></span>
-      <button id="glossary" class="icon-btn" title="Mark as glossary">📖</button>
-      <button id="table-toggle" class="icon-btn" title="Table view" hidden>⊞</button>
-      <button id="pin" class="icon-btn" title="Pin note">☆</button>
-      <button id="copy-note" class="icon-btn" title="Copy note text">⧉</button>
-      <button id="delete" class="icon-btn danger" title="Delete note">🗑</button>
+      <button id="pin" class="icon-btn" title="Pin note" aria-label="Pin note">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4l1.7 3.4 3.8.6-2.8 2.7.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.7 3.8-.6z"/></svg>
+      </button>
+      <button id="copy-note" class="icon-btn" title="Copy note text" aria-label="Copy note text">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5"/><path d="M10.5 3H4.8A1.8 1.8 0 0 0 3 4.8v5.7"/></svg>
+      </button>
+      <button id="delete" class="icon-btn danger" title="Delete note" aria-label="Delete note">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.8 7v4M9.2 7v4"/></svg>
+      </button>
     </div>
+
     <div id="meta-row">
       <input id="tags" type="text" placeholder="tags, comma separated" autocomplete="off">
       <input id="lang" type="text" placeholder="lang" size="4" maxlength="8"
@@ -34,9 +53,35 @@
         <option value="en"><option value="ka"><option value="de">
         <option value="fr"><option value="es"><option value="ru">
       </datalist>
+      <button id="glossary" class="pill" title="Glossary notes hold 'source term = translation' lines; Preview shows them as a copyable table" aria-pressed="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5"/></svg>
+        <span>Glossary</span>
+      </button>
     </div>
-    <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…&#10;&#10;In a glossary note, write one pair per line:&#10;source term = translation"></textarea>
-    <div id="glossary-table" hidden></div>
+
+    <div id="toolbar">
+      <button class="tool" data-action="bold" title="Bold (Ctrl+B)"><span class="t-b">B</span></button>
+      <button class="tool" data-action="italic" title="Italic (Ctrl+I)"><span class="t-i">I</span></button>
+      <button class="tool" data-action="strike" title="Strikethrough"><span class="t-s">S</span></button>
+      <button class="tool" data-action="heading" title="Heading"><span class="t-b">H</span></button>
+      <span class="tool-sep"></span>
+      <button class="tool" data-action="ul" title="Bullet list">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 4h7M6.5 8h7M6.5 12h7"/><circle cx="3.2" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="3.2" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="3.2" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button class="tool" data-action="ol" title="Numbered list">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 4h6.5M7 8h6.5M7 12h6.5"/><text x="2" y="5.6" font-size="5" fill="currentColor" stroke="none">1</text><text x="2" y="9.6" font-size="5" fill="currentColor" stroke="none">2</text><text x="2" y="13.6" font-size="5" fill="currentColor" stroke="none">3</text></svg>
+      </button>
+      <button class="tool" data-action="quote" title="Quote"><span class="t-q">❝</span></button>
+      <button class="tool" data-action="code" title="Code"><span class="t-c">&lt;/&gt;</span></button>
+      <button class="tool" data-action="link" title="Link">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 9.7 3.4-3.4M5 6.6 3.4 8.2a2.6 2.6 0 0 0 3.7 3.7l1.6-1.6M11 9.4l1.6-1.6a2.6 2.6 0 0 0-3.7-3.7L7.3 5.7"/></svg>
+      </button>
+    </div>
+    <p id="glossary-hint" hidden>One pair per line: <code>source term = translation</code>. Preview shows the table.</p>
+
+    <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…"></textarea>
+    <div id="preview" class="md" hidden></div>
+
     <footer id="editor-status">
       <span id="counts"></span>
       <span id="save-state"></span>
@@ -45,7 +90,9 @@
 
   <main id="settings-view" hidden>
     <div id="settings-bar">
-      <button id="settings-back" class="icon-btn" title="Back to list (Esc)">←</button>
+      <button id="settings-back" class="icon-btn" title="Back to list (Esc)" aria-label="Back to list">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
+      </button>
       <strong class="bar-title">Settings</strong>
       <span class="spacer"></span>
     </div>
@@ -80,8 +127,10 @@
     <button id="import">Import</button>
     <input id="import-file" type="file" accept=".json,application/json" hidden>
     <span class="spacer"></span>
-    <span id="storage-note">local-only</span>
-    <button id="settings" class="icon-btn" title="Settings">⚙</button>
+    <span id="storage-note" class="badge">local-only</span>
+    <button id="settings" class="icon-btn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10M3 11h10"/><circle cx="6.2" cy="5" r="1.7"/><circle cx="9.8" cy="11" r="1.7"/></svg>
+    </button>
   </footer>
 
   <script type="module" src="panel.js"></script>

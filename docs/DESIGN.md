@@ -100,13 +100,22 @@ end-to-end encryption — no third-party or first-party servers, ever.
 Note: sidebar position (left/right) is a browser-level Firefox setting
 (Settings → General → Browser Layout); extensions have no API for it.
 
-### v0.4 — writing comfort
+### v0.4 — formatting & redesign (shipped)
 
-- Markdown preview toggle (rendered through bundled DOMPurify — never raw
-  `innerHTML`)
-- Note templates (e.g., a job header: client / deadline / word count)
-- Adjustable editor font and size; monospace option
-- Trash with undo instead of hard delete
+- Rich formatting via Markdown: a toolbar (bold, italic, strike, heading,
+  lists, quote, code, link; Ctrl+B / Ctrl+I) inserts Markdown syntax, and a
+  **Write / Preview** segmented switch renders it. Notes stay plain text,
+  so search, sync, word counts, and exports are unaffected.
+- `sidebar/markdown.js` is a dependency-free renderer that HTML-escapes
+  every line *before* transforming, and only emits its own tags; links are
+  restricted to http(s). It is the only place user content reaches
+  `innerHTML`.
+- For glossary notes, Preview renders the copyable two-column table
+  instead of Markdown; the Glossary pill and an inline hint in Write mode
+  explain the `source term = translation` format.
+- Visual redesign: card-based note list, pill search, segmented controls,
+  inline SVG icons (no emoji buttons), refined light/dark palettes.
+- Still open: note templates, adjustable editor font, trash with undo.
 
 ### v1.0 — release
 
@@ -128,5 +137,6 @@ Note: sidebar position (left/right) is a browser-level Firefox setting
 - [ ] `permissions` in the manifest is still the minimum
 - [ ] Zero network requests (verify in the network panel)
 - [ ] All assets bundled; default extension CSP untouched
-- [ ] No `innerHTML` with user content anywhere
+- [ ] User content reaches `innerHTML` only through `markdown.js`, which
+      escapes all input before emitting its own tags
 - [ ] Export produces complete, human-readable data

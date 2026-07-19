@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Quiet Notes",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Private, local-first notes in your sidebar. No servers, no accounts, no tracking.",
   "homepage_url": "https://example.com/replace-with-your-repo",
   "browser_specific_settings": {
