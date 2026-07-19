@@ -4,8 +4,9 @@
 // user content may flow into innerHTML — keep it that way.
 //
 // Supported: # ## ### headings, **bold**, *italic*, ~~strike~~, `code`,
-// ``` fenced blocks, - / * bullets, 1. numbered lists, > quotes,
-// --- rules, [text](https://link).
+// ``` fenced blocks, - / * bullets, - [ ] / - [x] task items (emitted with
+// data-line so the UI can toggle them back into the source), 1. numbered
+// lists, > quotes, --- rules, [text](https://link).
 
 function escapeHtml(text) {
   return text
@@ -42,7 +43,7 @@ export function renderMarkdown(source) {
     list = null;
   };
 
-  for (const line of lines) {
+  for (const [lineNo, line] of lines.entries()) {
     if (line.startsWith("```")) {
       if (list === "code") close();
       else {
@@ -75,7 +76,15 @@ export function renderMarkdown(source) {
         out.push("<ul>");
         list = "ul";
       }
-      out.push(`<li>${inline(bullet[1])}</li>`);
+      const task = bullet[1].match(/^\[([ xX])\]\s+(.*)$/);
+      if (task) {
+        const checked = task[1] !== " " ? " checked" : "";
+        out.push(
+          `<li class="task"><label><input type="checkbox" class="task-box" data-line="${lineNo}"${checked}> <span>${inline(task[2])}</span></label></li>`
+        );
+      } else {
+        out.push(`<li>${inline(bullet[1])}</li>`);
+      }
     } else if (numbered) {
       if (list !== "ol") {
         close();

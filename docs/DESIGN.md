@@ -118,7 +118,32 @@ Note: sidebar position (left/right) is a browser-level Firefox setting
 - Visual redesign: card-based note list, pill search, segmented controls,
   inline SVG icons (no emoji buttons), refined light/dark palettes, and a
   deliberately compact chrome so most of the sidebar is note content.
-- Still open: note templates, adjustable editor font, trash with undo.
+### v0.5 — competitive catch-up (shipped)
+
+Informed by the survey in [RESEARCH.md](RESEARCH.md) (Notefox, Note
+Sidebar, Tab Notes, Web Highlights, cloud clippers):
+
+- **Trash instead of hard delete.** Soft-deleted notes keep syncing as
+  ordinary updates, sit in Settings → Trash for 30 days (restore, delete
+  forever, empty trash), and auto-purge on load. Deleting shows a
+  6-second Undo toast. Only purging triggers the sync tombstone.
+- **Note templates.** "Use as template" in the editor's ⋯ menu; the +
+  button then offers "Blank note" or any template. "Duplicate note"
+  lives in the same menu.
+- **Markdown checklists.** `- [ ]` / `- [x]` render as real checkboxes
+  in Preview; toggling writes back to the exact source line (the
+  renderer stamps each task with its line number).
+- **Appearance settings.** Note text size (S/M/L) and a monospace
+  toggle.
+- The search bar now exists only in the list view — it only ever
+  filtered the list, and removing it elsewhere frees vertical space.
+
+### v0.6 — candidate: per-site notes (researched, not started)
+
+- Attach notes to a domain or page (Notefox's flagship), done
+  privacy-first: the `tabs` permission goes in `optional_permissions`
+  and is requested at runtime only when the user enables the feature.
+  Off by default, one click to revoke. See RESEARCH.md for the survey.
 
 ### v1.0 — release
 

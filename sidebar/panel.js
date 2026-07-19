@@ -13,8 +13,10 @@ import { renderMarkdown } from "./markdown.js";
 const $ = (id) => document.getElementById(id);
 
 const ui = {
+  topbar: $("topbar"),
   search: $("search"),
   newNote: $("new-note"),
+  newMenu: $("new-menu"),
   listView: $("list-view"),
   noteList: $("note-list"),
   emptyHint: $("empty-hint"),
@@ -25,6 +27,10 @@ const ui = {
   pin: $("pin"),
   copyNote: $("copy-note"),
   delete: $("delete"),
+  more: $("more"),
+  moreMenu: $("more-menu"),
+  menuDuplicate: $("menu-duplicate"),
+  menuTemplate: $("menu-template"),
   tags: $("tags"),
   lang: $("lang"),
   glossary: $("glossary"),
@@ -41,6 +47,12 @@ const ui = {
   quotaFill: $("quota-fill"),
   quotaText: $("quota-text"),
   oversizedList: $("oversized-list"),
+  fontSize: $("font-size"),
+  monoToggle: $("mono-toggle"),
+  trashList: $("trash-list"),
+  emptyTrash: $("empty-trash"),
+  undoToast: $("undo-toast"),
+  undoBtn: $("undo-btn"),
   exportMd: $("export-md"),
   export: $("export"),
   import: $("import"),
@@ -55,9 +67,13 @@ let currentId = null;
 let mode = "write";
 let saveTimer = null;
 let deleteArmedUntil = 0;
+let lastTrashedId = null;
+let toastTimer = null;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
+const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const FONT_SIZES = { s: "13px", m: "14.5px", l: "16.5px" };
 
 const PLACEHOLDER_NOTE =
   "Type your note…\n\n**bold**  *italic*  `code`\n- list item\n# heading";
@@ -71,6 +87,8 @@ const ICON_PIN =
   "M8 2.4l1.7 3.4 3.8.6-2.8 2.7.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.7 3.8-.6z";
 const ICON_BOOK =
   "M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5";
+const ICON_TPL =
+  "M5.5 5.5h7v7h-7z M3 10.5V4.5A1.5 1.5 0 0 1 4.5 3H10";
 
 function svgIcon(pathData, filled) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -104,10 +122,22 @@ function relativeTime(timestamp) {
 }
 
 function sortedNotes() {
-  return Object.values(notes).sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return b.updatedAt - a.updatedAt;
-  });
+  return Object.values(notes)
+    .filter((note) => !note.deletedAt)
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.updatedAt - a.updatedAt;
+    });
+}
+
+function trashedNotes() {
+  return Object.values(notes)
+    .filter((note) => note.deletedAt)
+    .sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+function templateNotes() {
+  return sortedNotes().filter((note) => note.template);
 }
 
 function matchesQuery(note, query) {
@@ -142,6 +172,13 @@ function renderList() {
       const mark = document.createElement("span");
       mark.className = "note-pin";
       mark.append(svgIcon(ICON_BOOK));
+      title.append(mark);
+    }
+    if (note.template) {
+      const mark = document.createElement("span");
+      mark.className = "note-pin";
+      mark.title = "Template";
+      mark.append(svgIcon(ICON_TPL));
       title.append(mark);
     }
     const titleText = document.createElement("span");
@@ -286,9 +323,17 @@ function applyLang(value) {
 }
 
 function showView(view) {
+  // The search bar only filters the list, so it only exists there.
+  ui.topbar.hidden = view !== "list";
   ui.listView.hidden = view !== "list";
   ui.editorView.hidden = view !== "editor";
   ui.settingsView.hidden = view !== "settings";
+  closeMenus();
+}
+
+function closeMenus() {
+  ui.newMenu.hidden = true;
+  ui.moreMenu.hidden = true;
 }
 
 function openList() {
@@ -306,11 +351,27 @@ function openEditor(id) {
   ui.lang.value = note.lang || "";
   applyLang(note.lang);
   ui.pin.classList.toggle("pinned", Boolean(note.pinned));
+  ui.menuTemplate.textContent = note.template
+    ? "Stop using as template"
+    : "Use as template";
   renderGlossaryControls(note);
   showView("editor");
   ui.saveState.textContent = "";
   renderCounts();
   setMode(note.glossary && note.body.trim() ? "preview" : "write");
+}
+
+async function createNote(template) {
+  const note = newNote();
+  if (template) {
+    note.body = template.body;
+    note.tags = [...(template.tags || [])];
+    note.lang = template.lang || "";
+    note.glossary = Boolean(template.glossary);
+  }
+  notes[note.id] = note;
+  await saveNote(note);
+  openEditor(note.id);
 }
 
 // ---- Formatting toolbar ----
@@ -437,7 +498,7 @@ async function handleDelete() {
   if (Date.now() > deleteArmedUntil) {
     deleteArmedUntil = Date.now() + 3000;
     ui.delete.classList.add("armed");
-    ui.delete.title = "Click again to delete";
+    ui.delete.title = "Click again to move to trash";
     setTimeout(() => {
       if (Date.now() > deleteArmedUntil) disarmDelete();
     }, 3200);
@@ -447,9 +508,37 @@ async function handleDelete() {
   disarmDelete();
   clearTimeout(saveTimer);
   currentId = null;
+  // Soft delete: the note keeps syncing as a regular update and can be
+  // restored from the trash for 30 days. Real removal happens on purge.
+  const note = notes[id];
+  note.deletedAt = Date.now();
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  openList();
+  showUndoToast(id);
+}
+
+function showUndoToast(id) {
+  lastTrashedId = id;
+  ui.undoToast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (ui.undoToast.hidden = true), 6000);
+}
+
+async function undoTrash() {
+  ui.undoToast.hidden = true;
+  clearTimeout(toastTimer);
+  const note = notes[lastTrashedId];
+  if (!note) return;
+  delete note.deletedAt;
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  renderList();
+}
+
+async function purgeNote(id) {
   delete notes[id];
   await deleteNote(id);
-  openList();
 }
 
 // ---- Settings ----
@@ -488,10 +577,67 @@ async function renderSyncStatus() {
   }
 }
 
+function applyEditorPrefs() {
+  document.documentElement.style.setProperty(
+    "--note-font",
+    FONT_SIZES[settings.fontSize] || FONT_SIZES.m
+  );
+  document.body.classList.toggle("mono", Boolean(settings.mono));
+}
+
+function renderTrash() {
+  const trashed = trashedNotes();
+  ui.trashList.textContent = "";
+  ui.emptyTrash.hidden = trashed.length === 0;
+  if (!trashed.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "Trash is empty.";
+    ui.trashList.append(empty);
+    return;
+  }
+  for (const note of trashed) {
+    const row = document.createElement("div");
+    row.className = "trash-row";
+    const title = document.createElement("span");
+    title.className = "t";
+    title.textContent = titleOf(note);
+    title.title = titleOf(note);
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = relativeTime(note.deletedAt);
+    const restore = document.createElement("button");
+    restore.textContent = "Restore";
+    restore.addEventListener("click", async () => {
+      delete note.deletedAt;
+      note.updatedAt = Date.now();
+      await saveNote(note);
+      renderTrash();
+    });
+    const purge = document.createElement("button");
+    purge.textContent = "✕";
+    purge.title = "Delete forever";
+    purge.className = "danger";
+    purge.addEventListener("click", async () => {
+      await purgeNote(note.id);
+      renderTrash();
+    });
+    row.append(title, when, restore, purge);
+    ui.trashList.append(row);
+  }
+}
+
+function renderSettingsControls() {
+  ui.fontSize.value = settings.fontSize || "m";
+  ui.monoToggle.checked = Boolean(settings.mono);
+}
+
 function openSettings() {
   currentId = null;
   showView("settings");
+  renderSettingsControls();
   renderSyncStatus();
+  renderTrash();
 }
 
 // ---- Export / import ----
@@ -552,11 +698,52 @@ async function importFromFile(file) {
 
 // ---- Events ----
 
-ui.newNote.addEventListener("click", async () => {
-  const note = newNote();
-  notes[note.id] = note;
+ui.newNote.addEventListener("click", async (event) => {
+  const templates = templateNotes();
+  if (!templates.length) {
+    await createNote();
+    return;
+  }
+  event.stopPropagation();
+  ui.newMenu.textContent = "";
+  const blank = document.createElement("button");
+  blank.textContent = "Blank note";
+  blank.addEventListener("click", () => createNote());
+  ui.newMenu.append(blank);
+  for (const template of templates) {
+    const item = document.createElement("button");
+    item.textContent = `From: ${titleOf(template)}`;
+    item.addEventListener("click", () => createNote(template));
+    ui.newMenu.append(item);
+  }
+  ui.newMenu.hidden = !ui.newMenu.hidden;
+});
+
+ui.more.addEventListener("click", (event) => {
+  event.stopPropagation();
+  ui.moreMenu.hidden = !ui.moreMenu.hidden;
+});
+
+ui.menuDuplicate.addEventListener("click", async () => {
+  const source = notes[currentId];
+  await flushSave();
+  await createNote(source);
+});
+
+ui.menuTemplate.addEventListener("click", async () => {
+  const note = notes[currentId];
+  note.template = !note.template;
+  note.updatedAt = Date.now();
   await saveNote(note);
-  openEditor(note.id);
+  ui.menuTemplate.textContent = note.template
+    ? "Stop using as template"
+    : "Use as template";
+  ui.moreMenu.hidden = true;
+});
+
+// Any click outside a menu closes both dropdowns.
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".menu") && event.target !== ui.more) closeMenus();
 });
 
 ui.noteList.addEventListener("click", (event) => {
@@ -648,8 +835,45 @@ ui.copyNote.addEventListener("click", async () => {
 });
 
 ui.delete.addEventListener("click", handleDelete);
+ui.undoBtn.addEventListener("click", undoTrash);
+
+// Toggling a checklist item in Preview writes the change back to the
+// Markdown source line it came from.
+ui.preview.addEventListener("change", async (event) => {
+  const box = event.target.closest(".task-box");
+  if (!box) return;
+  const lineNo = Number(box.dataset.line);
+  const lines = ui.editor.value.split("\n");
+  if (lines[lineNo] === undefined) return;
+  lines[lineNo] = box.checked
+    ? lines[lineNo].replace(/\[[ ]\]/, "[x]")
+    : lines[lineNo].replace(/\[[xX]\]/, "[ ]");
+  ui.editor.value = lines.join("\n");
+  renderCounts();
+  await flushSave();
+  const scroll = ui.preview.scrollTop;
+  renderPreview();
+  ui.preview.scrollTop = scroll;
+});
 
 ui.settings.addEventListener("click", openSettings);
+
+ui.fontSize.addEventListener("change", async () => {
+  settings.fontSize = ui.fontSize.value;
+  applyEditorPrefs();
+  await saveSettings(settings);
+});
+
+ui.monoToggle.addEventListener("change", async () => {
+  settings.mono = ui.monoToggle.checked;
+  applyEditorPrefs();
+  await saveSettings(settings);
+});
+
+ui.emptyTrash.addEventListener("click", async () => {
+  for (const note of trashedNotes()) await purgeNote(note.id);
+  renderTrash();
+});
 
 ui.syncToggle.addEventListener("change", async () => {
   settings.syncEnabled = ui.syncToggle.checked;
@@ -672,7 +896,7 @@ window.addEventListener("blur", flushSave);
 
 onExternalChange(async () => {
   notes = await loadNotes();
-  if (currentId && !notes[currentId]) {
+  if (currentId && (!notes[currentId] || notes[currentId].deletedAt)) {
     openList();
   } else if (currentId) {
     // Refresh the open note (e.g., sync pulled a newer version) unless the
@@ -693,5 +917,11 @@ onExternalChange(async () => {
 (async function init() {
   [notes, settings] = await Promise.all([loadNotes(), loadSettings()]);
   renderStorageBadge();
+  applyEditorPrefs();
   openList();
+  // Purge notes that have sat in the trash longer than 30 days.
+  const cutoff = Date.now() - TRASH_TTL_MS;
+  for (const note of Object.values(notes)) {
+    if (note.deletedAt && note.deletedAt < cutoff) await purgeNote(note.id);
+  }
 })();

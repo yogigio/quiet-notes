@@ -52,7 +52,8 @@ browser.menus.onClicked.addListener((info) => {
 async function appendToInbox(text) {
   const everything = await local.get(null);
   const found = Object.entries(everything).find(
-    ([key, value]) => key.startsWith(NOTE_PREFIX) && value.inbox
+    ([key, value]) =>
+      key.startsWith(NOTE_PREFIX) && value.inbox && !value.deletedAt
   );
   const now = Date.now();
   const inbox = found

@@ -16,6 +16,10 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Save selection**: right-click selected text on any page → appended to a
   pinned Inbox note (the extension still has zero access to page content)
 - Per-note language for the spellcheck dictionary; RTL/mixed text handled
+- **Checklists**: `- [ ]` task lines become toggleable checkboxes in Preview
+- **Trash with undo**: deleted notes are recoverable for 30 days
+- **Templates**: mark any note as a template, create new notes from it
+- Adjustable note text size and a monospace option
 - **Opt-in sync** via Firefox Sync (off by default; quota meter in settings)
 - Export/import as JSON; export as Markdown
 
