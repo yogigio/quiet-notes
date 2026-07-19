@@ -34,8 +34,7 @@ Firefox. Sources: AMO listings, project GitHub pages, category guides.
 ## Priority order (feeds the roadmap)
 
 1. ~~Trash, templates, checklists, editor prefs~~ → v0.5
-2. Per-site notes via optional `tabs` permission, with a badge and a
-   "notes for this site" filter → v0.6 candidate
+2. ~~Per-site notes via optional `tabs` permission~~ → v0.6
 3. Master password (WebCrypto, at-rest + in-mirror encryption)
 4. Localization (en, ka), AMO release polish
 5. Android exploration (popup UI)

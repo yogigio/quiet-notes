@@ -20,6 +20,10 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Trash with undo**: deleted notes are recoverable for 30 days
 - **Templates**: mark any note as a template, create new notes from it
 - Adjustable note text size and a monospace option
+- **Site notes** (optional): link a note to the site you're on and it
+  surfaces on top of the list when you return. Off by default — enabling
+  it requests the `tabs` permission at runtime (hostname only, revoked
+  instantly when you turn it off)
 - **Opt-in sync** via Firefox Sync (off by default; quota meter in settings)
 - Export/import as JSON; export as Markdown
 

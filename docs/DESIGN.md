@@ -138,12 +138,20 @@ Sidebar, Tab Notes, Web Highlights, cloud clippers):
 - The search bar now exists only in the list view — it only ever
   filtered the list, and removing it elsewhere frees vertical space.
 
-### v0.6 — candidate: per-site notes (researched, not started)
+### v0.6 — per-site notes (shipped)
 
-- Attach notes to a domain or page (Notefox's flagship), done
-  privacy-first: the `tabs` permission goes in `optional_permissions`
-  and is requested at runtime only when the user enables the feature.
-  Off by default, one click to revoke. See RESEARCH.md for the survey.
+- Notes can be linked to the website you're viewing ("Link to
+  {domain}" in the editor's ⋯ menu). When you're back on that site, a
+  small "On {domain}" group appears at the top of the list; linked notes
+  show the domain as a chip, and plain search also matches domains.
+- Privacy design: the `tabs` permission is declared under
+  `optional_permissions` and requested at runtime only when the user
+  turns on "Site notes" in settings. Turning it off calls
+  `permissions.remove()` immediately. Only the active tab's hostname is
+  read (www. stripped, http/https only) — never full URLs, titles, page
+  content, or history — and the hostname is stored only on notes the
+  user explicitly links. With the toggle off, the extension behaves
+  exactly as before: no tab access at all.
 
 ### v1.0 — release
 

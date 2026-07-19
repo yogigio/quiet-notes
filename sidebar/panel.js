@@ -31,6 +31,7 @@ const ui = {
   moreMenu: $("more-menu"),
   menuDuplicate: $("menu-duplicate"),
   menuTemplate: $("menu-template"),
+  menuSite: $("menu-site"),
   tags: $("tags"),
   lang: $("lang"),
   glossary: $("glossary"),
@@ -47,6 +48,7 @@ const ui = {
   quotaFill: $("quota-fill"),
   quotaText: $("quota-text"),
   oversizedList: $("oversized-list"),
+  siteToggle: $("site-toggle"),
   fontSize: $("font-size"),
   monoToggle: $("mono-toggle"),
   trashList: $("trash-list"),
@@ -69,6 +71,9 @@ let saveTimer = null;
 let deleteArmedUntil = 0;
 let lastTrashedId = null;
 let toastTimer = null;
+let sitePermission = false;
+let currentHost = "";
+let siteTrackingStarted = false;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
@@ -146,7 +151,44 @@ function matchesQuery(note, query) {
     const tag = query.slice(1);
     return (note.tags || []).some((t) => t.toLowerCase().includes(tag));
   }
-  return note.body.toLowerCase().includes(query);
+  return (
+    note.body.toLowerCase().includes(query) ||
+    (note.site || "").includes(query)
+  );
+}
+
+// ---- Site notes (optional "tabs" permission, hostname only) ----
+
+function hostOf(url) {
+  if (!/^https?:/.test(url || "")) return "";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+async function refreshHost() {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    const host = hostOf(tab && tab.url);
+    if (host !== currentHost) {
+      currentHost = host;
+      if (!ui.listView.hidden) renderList();
+    }
+  } catch {
+    currentHost = "";
+  }
+}
+
+function startSiteTracking() {
+  if (siteTrackingStarted) return;
+  siteTrackingStarted = true;
+  refreshHost();
+  browser.tabs.onActivated.addListener(refreshHost);
+  browser.tabs.onUpdated.addListener((tabId, info) => {
+    if (info.url || info.status === "complete") refreshHost();
+  });
 }
 
 // ---- List view ----
@@ -156,58 +198,87 @@ function renderList() {
   const visible = sortedNotes().filter((note) => matchesQuery(note, query));
 
   ui.noteList.textContent = "";
-  for (const note of visible) {
-    const item = document.createElement("li");
-    item.dataset.id = note.id;
-
-    const title = document.createElement("span");
-    title.className = "note-title";
-    if (note.pinned) {
-      const pin = document.createElement("span");
-      pin.className = "note-pin";
-      pin.append(svgIcon(ICON_PIN, true));
-      title.append(pin);
+  const siteGroup =
+    sitePermission && currentHost
+      ? visible.filter((note) => note.site === currentHost)
+      : [];
+  if (siteGroup.length) {
+    appendGroupLabel(`On ${currentHost}`);
+    for (const note of siteGroup) appendCard(note);
+    appendGroupLabel("All notes");
+    for (const note of visible) {
+      if (note.site !== currentHost) appendCard(note);
     }
-    if (note.glossary) {
-      const mark = document.createElement("span");
-      mark.className = "note-pin";
-      mark.append(svgIcon(ICON_BOOK));
-      title.append(mark);
-    }
-    if (note.template) {
-      const mark = document.createElement("span");
-      mark.className = "note-pin";
-      mark.title = "Template";
-      mark.append(svgIcon(ICON_TPL));
-      title.append(mark);
-    }
-    const titleText = document.createElement("span");
-    titleText.className = "t-text";
-    titleText.textContent = titleOf(note);
-    title.append(titleText);
-
-    const snippet = document.createElement("span");
-    snippet.className = "note-snippet";
-    snippet.textContent = snippetOf(note);
-
-    const meta = document.createElement("span");
-    meta.className = "note-meta";
-    const time = document.createElement("span");
-    time.textContent = relativeTime(note.updatedAt);
-    meta.append(time);
-    for (const tag of (note.tags || []).slice(0, 3)) {
-      const chip = document.createElement("button");
-      chip.className = "tag-chip";
-      chip.textContent = tag;
-      chip.dataset.tag = tag;
-      meta.append(chip);
-    }
-
-    item.append(title, snippet, meta);
-    ui.noteList.append(item);
+  } else {
+    for (const note of visible) appendCard(note);
   }
 
-  ui.emptyHint.hidden = Object.keys(notes).length > 0;
+  ui.emptyHint.hidden = sortedNotes().length > 0;
+}
+
+function appendGroupLabel(text) {
+  const label = document.createElement("li");
+  label.className = "group-label";
+  label.textContent = text;
+  ui.noteList.append(label);
+}
+
+function appendCard(note) {
+  const item = document.createElement("li");
+  item.dataset.id = note.id;
+
+  const title = document.createElement("span");
+  title.className = "note-title";
+  if (note.pinned) {
+    const pin = document.createElement("span");
+    pin.className = "note-pin";
+    pin.append(svgIcon(ICON_PIN, true));
+    title.append(pin);
+  }
+  if (note.glossary) {
+    const mark = document.createElement("span");
+    mark.className = "note-pin";
+    mark.append(svgIcon(ICON_BOOK));
+    title.append(mark);
+  }
+  if (note.template) {
+    const mark = document.createElement("span");
+    mark.className = "note-pin";
+    mark.title = "Template";
+    mark.append(svgIcon(ICON_TPL));
+    title.append(mark);
+  }
+  const titleText = document.createElement("span");
+  titleText.className = "t-text";
+  titleText.textContent = titleOf(note);
+  title.append(titleText);
+
+  const snippet = document.createElement("span");
+  snippet.className = "note-snippet";
+  snippet.textContent = snippetOf(note);
+
+  const meta = document.createElement("span");
+  meta.className = "note-meta";
+  const time = document.createElement("span");
+  time.textContent = relativeTime(note.updatedAt);
+  meta.append(time);
+  for (const tag of (note.tags || []).slice(0, 3)) {
+    const chip = document.createElement("button");
+    chip.className = "tag-chip";
+    chip.textContent = tag;
+    chip.dataset.tag = tag;
+    meta.append(chip);
+  }
+  if (note.site) {
+    const chip = document.createElement("button");
+    chip.className = "tag-chip site-chip";
+    chip.textContent = note.site;
+    chip.dataset.site = note.site;
+    meta.append(chip);
+  }
+
+  item.append(title, snippet, meta);
+  ui.noteList.append(item);
 }
 
 // ---- Editor: modes ----
@@ -630,6 +701,7 @@ function renderTrash() {
 function renderSettingsControls() {
   ui.fontSize.value = settings.fontSize || "m";
   ui.monoToggle.checked = Boolean(settings.mono);
+  ui.siteToggle.checked = sitePermission;
 }
 
 function openSettings() {
@@ -719,9 +791,33 @@ ui.newNote.addEventListener("click", async (event) => {
   ui.newMenu.hidden = !ui.newMenu.hidden;
 });
 
+function refreshSiteMenuItem() {
+  const note = notes[currentId];
+  if (!sitePermission || !note || (!note.site && !currentHost)) {
+    ui.menuSite.hidden = true;
+    return;
+  }
+  ui.menuSite.hidden = false;
+  ui.menuSite.textContent = note.site
+    ? `Unlink from ${note.site}`
+    : `Link to ${currentHost}`;
+}
+
 ui.more.addEventListener("click", (event) => {
   event.stopPropagation();
+  refreshSiteMenuItem();
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
+});
+
+ui.menuSite.addEventListener("click", async () => {
+  const note = notes[currentId];
+  if (note.site) delete note.site;
+  else if (currentHost) note.site = currentHost;
+  else return;
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  refreshSiteMenuItem();
+  ui.moreMenu.hidden = true;
 });
 
 ui.menuDuplicate.addEventListener("click", async () => {
@@ -749,12 +845,12 @@ document.addEventListener("click", (event) => {
 ui.noteList.addEventListener("click", (event) => {
   const chip = event.target.closest(".tag-chip");
   if (chip) {
-    ui.search.value = `#${chip.dataset.tag}`;
+    ui.search.value = chip.dataset.site || `#${chip.dataset.tag}`;
     renderList();
     return;
   }
   const item = event.target.closest("li");
-  if (item) openEditor(item.dataset.id);
+  if (item && item.dataset.id) openEditor(item.dataset.id);
 });
 
 ui.search.addEventListener("input", renderList);
@@ -858,6 +954,32 @@ ui.preview.addEventListener("change", async (event) => {
 
 ui.settings.addEventListener("click", openSettings);
 
+ui.siteToggle.addEventListener("change", async () => {
+  if (ui.siteToggle.checked) {
+    let granted = false;
+    try {
+      granted = await browser.permissions.request({ permissions: ["tabs"] });
+    } catch {
+      granted = false;
+    }
+    if (!granted) {
+      ui.siteToggle.checked = false;
+      return;
+    }
+    sitePermission = true;
+    startSiteTracking();
+    refreshHost();
+  } else {
+    sitePermission = false;
+    currentHost = "";
+    try {
+      await browser.permissions.remove({ permissions: ["tabs"] });
+    } catch {
+      // Permission may already be gone; the toggle state is what matters.
+    }
+  }
+});
+
 ui.fontSize.addEventListener("change", async () => {
   settings.fontSize = ui.fontSize.value;
   applyEditorPrefs();
@@ -916,6 +1038,12 @@ onExternalChange(async () => {
 
 (async function init() {
   [notes, settings] = await Promise.all([loadNotes(), loadSettings()]);
+  try {
+    sitePermission = await browser.permissions.contains({ permissions: ["tabs"] });
+  } catch {
+    sitePermission = false;
+  }
+  if (sitePermission) startSiteTracking();
   renderStorageBadge();
   applyEditorPrefs();
   openList();

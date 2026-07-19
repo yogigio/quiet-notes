@@ -50,6 +50,7 @@
       <div id="more-menu" class="menu" hidden>
         <button id="menu-duplicate">Duplicate note</button>
         <button id="menu-template">Use as template</button>
+        <button id="menu-site" hidden>Link to this site</button>
       </div>
     </div>
 
@@ -125,6 +126,20 @@
           <span id="quota-text" class="hint"></span>
         </div>
         <p id="oversized-list" class="hint warn" hidden></p>
+      </section>
+      <section class="setting">
+        <label class="check-row">
+          <input type="checkbox" id="site-toggle">
+          <span>Site notes</span>
+        </label>
+        <p class="hint">
+          Link notes to the website you're on (via the note's ⋯ menu) and
+          they appear on top of the list whenever you're back on that site.
+          Turning this on asks Firefox for the "Access browser tabs"
+          permission — used only to read the current tab's domain. Full
+          addresses, page content, and history are never read. Turning it
+          off revokes the permission immediately.
+        </p>
       </section>
       <section class="setting">
         <strong>Appearance</strong>

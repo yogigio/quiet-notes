@@ -262,6 +262,30 @@ svg {
 
 .tag-chip:hover { background: var(--hover); }
 
+.tag-chip.site-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.tag-chip.site-chip:hover { background: var(--hover); }
+
+#note-list li.group-label,
+#note-list li.group-label:hover {
+  padding: 6px 4px 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  translate: none;
+  cursor: default;
+  color: var(--text-dim);
+  font-size: 0.76em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 #empty-hint {
   margin-top: 38%;
   text-align: center;
