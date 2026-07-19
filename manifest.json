@@ -15,10 +15,18 @@
     "48": "icons/note.svg",
     "96": "icons/note.svg"
   },
+  "action": {
+    "default_icon": "icons/note.svg",
+    "default_title": "Toggle Quiet Notes sidebar"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
   "sidebar_action": {
     "default_title": "Quiet Notes",
     "default_panel": "sidebar/panel.html",
-    "default_icon": "icons/note.svg"
+    "default_icon": "icons/note.svg",
+    "open_at_install": true
   },
   "commands": {
     "_execute_sidebar_action": {
