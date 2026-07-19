@@ -53,7 +53,7 @@
         <option value="en"><option value="ka"><option value="de">
         <option value="fr"><option value="es"><option value="ru">
       </datalist>
-      <button id="glossary" class="pill" title="Glossary notes hold 'source term = translation' lines; Preview shows them as a copyable table" aria-pressed="false">
+      <button id="glossary" class="pill" title="Glossary notes hold 'source term == translation' lines; Preview shows them as a copyable table" aria-pressed="false">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5"/></svg>
         <span>Glossary</span>
       </button>
@@ -77,7 +77,10 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.3 9.7 3.4-3.4M5 6.6 3.4 8.2a2.6 2.6 0 0 0 3.7 3.7l1.6-1.6M11 9.4l1.6-1.6a2.6 2.6 0 0 0-3.7-3.7L7.3 5.7"/></svg>
       </button>
     </div>
-    <p id="glossary-hint" hidden>One pair per line: <code>source term = translation</code>. Preview shows the table.</p>
+    <p id="glossary-hint" hidden>
+      <span>One pair per line: <code>source term == translation</code>. Preview shows the table.</span>
+      <button id="glossary-hint-close" title="Hide this hint permanently" aria-label="Hide this hint permanently">×</button>
+    </p>
 
     <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…"></textarea>
     <div id="preview" class="md" hidden></div>

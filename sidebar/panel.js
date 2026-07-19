@@ -62,7 +62,7 @@ const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
 const PLACEHOLDER_NOTE =
   "Type your note…\n\n**bold**  *italic*  `code`\n- list item\n# heading";
 const PLACEHOLDER_GLOSSARY =
-  "source term = translation\nanother term = its translation\n\nLines without “=” become section headers.";
+  "source term == translation\nanother term == its translation\n\nPlain lines stay plain text.";
 
 // ---- Small helpers ----
 
@@ -185,7 +185,8 @@ function setMode(next) {
   ui.editor.hidden = !write;
   ui.preview.hidden = write;
   ui.toolbar.hidden = !write || isGlossary();
-  ui.glossaryHint.hidden = !write || !isGlossary();
+  ui.glossaryHint.hidden =
+    !write || !isGlossary() || Boolean(settings.hideGlossaryHint);
   ui.modeWrite.classList.toggle("active", write);
   ui.modePreview.classList.toggle("active", !write);
   if (write) {
@@ -208,19 +209,30 @@ function renderPreview() {
   }
 }
 
-// Glossary lines are "source = translation" (or tab-separated). Lines
-// without a separator become section headers.
+// Glossary lines are "source == translation" (or tab-separated, as pasted
+// from a spreadsheet). A single "=" is NOT a separator, since it appears
+// in ordinary text. Lines without a separator stay plain text.
 function parseGlossary(body) {
   return body
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const idx = line.search(/[=\t]/);
-      if (idx === -1) return { header: line };
+      const eq = line.indexOf("==");
+      const tab = line.indexOf("\t");
+      let idx = -1;
+      let len = 0;
+      if (eq !== -1 && (tab === -1 || eq < tab)) {
+        idx = eq;
+        len = 2;
+      } else if (tab !== -1) {
+        idx = tab;
+        len = 1;
+      }
+      if (idx === -1) return { text: line };
       return {
         term: line.slice(0, idx).trim(),
-        translation: line.slice(idx + 1).trim(),
+        translation: line.slice(idx + len).trim(),
       };
     });
 }
@@ -229,9 +241,9 @@ function renderGlossaryTable(container) {
   const rows = parseGlossary(ui.editor.value);
   for (const row of rows) {
     const el = document.createElement("div");
-    if (row.header) {
-      el.className = "gloss-header";
-      el.textContent = row.header;
+    if (row.text) {
+      el.className = "gloss-text";
+      el.textContent = row.text;
     } else {
       el.className = "gloss-row";
       el.title = "Click to copy the translation";
@@ -251,7 +263,7 @@ function renderGlossaryTable(container) {
   if (!rows.length) {
     const hint = document.createElement("p");
     hint.className = "hint";
-    hint.textContent = "One pair per line: source term = translation";
+    hint.textContent = "One pair per line: source term == translation";
     container.append(hint);
   }
 }
@@ -603,6 +615,14 @@ ui.toolbar.addEventListener("click", (event) => {
     toolbarActions[button.dataset.action]();
   }
 });
+
+document
+  .getElementById("glossary-hint-close")
+  .addEventListener("click", async () => {
+    settings.hideGlossaryHint = true;
+    ui.glossaryHint.hidden = true;
+    await saveSettings(settings);
+  });
 
 ui.glossary.addEventListener("click", async () => {
   const note = notes[currentId];

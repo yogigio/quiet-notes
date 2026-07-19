@@ -85,10 +85,11 @@ end-to-end encryption — no third-party or first-party servers, ever.
 - **Tags** per note, entered comma-separated in the editor; shown as chips
   in the list; `#tag` in the search box filters by tag, clicking a chip
   fills it in
-- **Glossary notes:** any note can be marked 📖; lines of
-  `source term = translation` (or tab-separated) render as a two-column
-  table where clicking a row copies the translation; lines without a
-  separator become section headers
+- **Glossary notes:** any note can be marked as a glossary; lines of
+  `source term == translation` (or tab-separated, as pasted from a
+  spreadsheet) render as a two-column table where clicking a row copies
+  the translation. A single `=` is not a separator (it appears in normal
+  text); lines without a separator stay plain text
 - **Save selection** via right-click context menu (`menus` permission — no
   host access; the selected text arrives in the click event). Selections
   are appended to a pinned Inbox note, created on first use, and the
@@ -112,9 +113,11 @@ Note: sidebar position (left/right) is a browser-level Firefox setting
   `innerHTML`.
 - For glossary notes, Preview renders the copyable two-column table
   instead of Markdown; the Glossary pill and an inline hint in Write mode
-  explain the `source term = translation` format.
+  explain the `source term == translation` format. The hint is dismissible
+  and the dismissal is remembered (settings.hideGlossaryHint).
 - Visual redesign: card-based note list, pill search, segmented controls,
-  inline SVG icons (no emoji buttons), refined light/dark palettes.
+  inline SVG icons (no emoji buttons), refined light/dark palettes, and a
+  deliberately compact chrome so most of the sidebar is note content.
 - Still open: note templates, adjustable editor font, trash with undo.
 
 ### v1.0 — release
