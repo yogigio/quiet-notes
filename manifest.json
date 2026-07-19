@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Quiet Notes",
+  "version": "0.1.0",
+  "description": "Private, local-first notes in your sidebar. No servers, no accounts, no tracking.",
+  "homepage_url": "https://example.com/replace-with-your-repo",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "quiet-notes@giorgi.notes",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": ["storage"],
+  "icons": {
+    "48": "icons/note.svg",
+    "96": "icons/note.svg"
+  },
+  "sidebar_action": {
+    "default_title": "Quiet Notes",
+    "default_panel": "sidebar/panel.html",
+    "default_icon": "icons/note.svg"
+  },
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Ctrl+Alt+N"
+      },
+      "description": "Open the Quiet Notes sidebar"
+    }
+  }
+}
