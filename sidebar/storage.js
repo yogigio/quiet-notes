@@ -10,9 +10,21 @@ export function newNote() {
     id: crypto.randomUUID(),
     body: "",
     pinned: false,
+    tags: [],
+    lang: "",
+    glossary: false,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function loadSettings() {
+  const { settings } = await browser.storage.local.get("settings");
+  return settings || { syncEnabled: false };
+}
+
+export async function saveSettings(settings) {
+  await browser.storage.local.set({ settings });
 }
 
 export async function loadNotes() {

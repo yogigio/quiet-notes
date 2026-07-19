@@ -7,7 +7,7 @@
 </head>
 <body>
   <header id="topbar">
-    <input id="search" type="search" placeholder="Search notes…" autocomplete="off">
+    <input id="search" type="search" placeholder="Search notes… (#tag filters by tag)" autocomplete="off">
     <button id="new-note" class="icon-btn" title="New note">+</button>
   </header>
 
@@ -20,22 +20,68 @@
     <div id="editor-bar">
       <button id="back" class="icon-btn" title="Back to list (Esc)">←</button>
       <span class="spacer"></span>
+      <button id="glossary" class="icon-btn" title="Mark as glossary">📖</button>
+      <button id="table-toggle" class="icon-btn" title="Table view" hidden>⊞</button>
       <button id="pin" class="icon-btn" title="Pin note">☆</button>
       <button id="copy-note" class="icon-btn" title="Copy note text">⧉</button>
       <button id="delete" class="icon-btn danger" title="Delete note">🗑</button>
     </div>
-    <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…"></textarea>
+    <div id="meta-row">
+      <input id="tags" type="text" placeholder="tags, comma separated" autocomplete="off">
+      <input id="lang" type="text" placeholder="lang" size="4" maxlength="8"
+             autocomplete="off" title="Language code for spellcheck, e.g. de, ka, fr" list="langs">
+      <datalist id="langs">
+        <option value="en"><option value="ka"><option value="de">
+        <option value="fr"><option value="es"><option value="ru">
+      </datalist>
+    </div>
+    <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…&#10;&#10;In a glossary note, write one pair per line:&#10;source term = translation"></textarea>
+    <div id="glossary-table" hidden></div>
     <footer id="editor-status">
       <span id="counts"></span>
       <span id="save-state"></span>
     </footer>
   </main>
 
+  <main id="settings-view" hidden>
+    <div id="settings-bar">
+      <button id="settings-back" class="icon-btn" title="Back to list (Esc)">←</button>
+      <strong class="bar-title">Settings</strong>
+      <span class="spacer"></span>
+    </div>
+    <div id="settings-body">
+      <section class="setting">
+        <label class="check-row">
+          <input type="checkbox" id="sync-toggle">
+          <span>Sync notes across devices</span>
+        </label>
+        <p class="hint">
+          Off: notes never leave this browser.
+          On: notes are mirrored through Firefox Sync, end-to-end encrypted
+          with keys derived on your devices — Mozilla only relays ciphertext,
+          and no other server is involved. Requires signing in to Firefox
+          with Sync enabled on each device.
+        </p>
+        <div id="quota" hidden>
+          <div id="quota-bar"><div id="quota-fill"></div></div>
+          <span id="quota-text" class="hint"></span>
+        </div>
+        <p id="oversized-list" class="hint warn" hidden></p>
+      </section>
+      <section class="setting">
+        <button id="export-md" class="wide-btn">Export all notes as Markdown</button>
+        <p class="hint">JSON export/import for backups is in the bottom bar.</p>
+      </section>
+    </div>
+  </main>
+
   <footer id="bottombar">
     <button id="export">Export</button>
     <button id="import">Import</button>
     <input id="import-file" type="file" accept=".json,application/json" hidden>
-    <span id="storage-note" title="All notes stay in this browser. Nothing is sent anywhere.">local-only</span>
+    <span class="spacer"></span>
+    <span id="storage-note">local-only</span>
+    <button id="settings" class="icon-btn" title="Settings">⚙</button>
   </footer>
 
   <script type="module" src="panel.js"></script>
