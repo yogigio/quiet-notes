@@ -9,8 +9,10 @@
 //      to any server.
 //
 // Sync mirror layout (see docs/DESIGN.md):
-//   "note:<id>"    header { id, updatedAt, chunkCount }
-//   "note:<id>#N"  chunk N of the JSON-serialized note
+//   "note:<id>"    header { id, updatedAt, chunkCount, gz }
+//   "note:<id>#N"  chunk N of the note: gzip+base64 when gz is true
+//                  (raw JSON when compression wouldn't help, or for
+//                  mirrors written before v0.6.1)
 //   "tomb:<id>"    deletion marker (timestamp)
 //
 // Safety rule: key *removals* arriving from sync are ignored unless a
@@ -85,18 +87,51 @@ function chunkKeysFor(id, count) {
   return Array.from({ length: count }, (_, i) => `${NOTE_PREFIX}${id}#${i}`);
 }
 
+// Compression roughly halves-to-thirds typical text (more for non-Latin
+// scripts, which are 3 bytes/char in UTF-8), stretching the ~100 KB
+// storage.sync quota. Base64 keeps the chunks JSON-safe.
+
+async function gzipToBase64(text) {
+  const stream = new Blob([text])
+    .stream()
+    .pipeThrough(new CompressionStream("gzip"));
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+async function gunzipFromBase64(base64) {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).text();
+}
+
 async function pushNote(note) {
   const headerKey = NOTE_PREFIX + note.id;
   const existing = (await sync.get(headerKey))[headerKey];
   if (existing && existing.updatedAt >= note.updatedAt) return;
 
   const json = JSON.stringify(note);
+  const compressed = await gzipToBase64(json);
+  // Tiny notes can come out larger after gzip+base64; store those raw.
+  const gz = compressed.length < new TextEncoder().encode(json).length;
+  const text = gz ? compressed : json;
   const chunks = [];
-  for (let i = 0; i < json.length; i += CHUNK_SIZE) {
-    chunks.push(json.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+    chunks.push(text.slice(i, i + CHUNK_SIZE));
   }
   const payload = {
-    [headerKey]: { id: note.id, updatedAt: note.updatedAt, chunkCount: chunks.length },
+    [headerKey]: {
+      id: note.id,
+      updatedAt: note.updatedAt,
+      chunkCount: chunks.length,
+      gz,
+    },
   };
   chunks.forEach((chunk, i) => (payload[`${headerKey}#${i}`] = chunk));
 
@@ -121,7 +156,8 @@ async function pullNote(id) {
   const got = await sync.get(keys);
   let note;
   try {
-    note = JSON.parse(keys.map((key) => got[key]).join(""));
+    const joined = keys.map((key) => got[key]).join("");
+    note = JSON.parse(header.gz ? await gunzipFromBase64(joined) : joined);
   } catch {
     return; // partial write still in flight; a later change event retries
   }

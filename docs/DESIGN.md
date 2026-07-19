@@ -41,9 +41,16 @@ end-to-end encryption — no third-party or first-party servers, ever.
   mirror from `storage.sync`.
 - Firefox Sync encrypts end-to-end with keys derived on the user's device,
   so Mozilla only relays ciphertext. No extra crypto needed for transport.
-- Mirror layout: `note:<id>` holds a header `{ id, updatedAt, chunkCount }`;
-  the JSON-serialized note is split into `note:<id>#N` chunks of ≤ 6000
-  chars each, under the 8 KB per-item quota.
+- Mirror layout: `note:<id>` holds a header
+  `{ id, updatedAt, chunkCount, gz }`; the JSON-serialized note is split
+  into `note:<id>#N` chunks of ≤ 6000 chars each, under the 8 KB
+  per-item quota.
+- Compression (v0.6.1): notes are gzipped (`CompressionStream`, no
+  dependencies) and base64-encoded before chunking, typically shrinking
+  text 40–90% and stretching the ~100 KB quota accordingly. Notes where
+  gzip+base64 wouldn't pay (tiny ones) are stored raw with `gz: false`;
+  readers handle both, so mirrors written before v0.6.1 keep working and
+  recompress on their next edit.
 - Quota handling: total quota is ~100 KB. A quota meter in settings shows
   usage. When a `sync.set` fails (quota), the note is recorded in a local
   `oversized` list, shown in settings, and simply stays local-only — local
@@ -162,11 +169,17 @@ Sidebar, Tab Notes, Web Highlights, cloud clippers):
 
 ### Later / maybe
 
-- Master password: AES-GCM via WebCrypto, key from PBKDF2; encrypts note
-  bodies at rest and in the sync mirror. Off by default — losing the
-  password means losing the notes, which must be stated loudly.
-- Note-to-note links (`[[title]]`)
+- Note-to-note links (`[[title]]`) with backlinks
+- Per-note version history (local snapshots, restore UI)
 - Full-history export (versioned snapshots)
+
+### Decided against (owner's call, 2026-07-20)
+
+- **Master password**: not needed for this use case — Firefox Sync
+  already E2E-encrypts the mirror, disk encryption is the OS's job, and
+  a lost password would mean lost notes. Revisit only if profile-sharing
+  becomes a concern.
+- **Localization**: deferred until an AMO release is actually planned.
 
 ## Privacy checklist (every release)
 
