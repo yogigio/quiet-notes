@@ -21,6 +21,7 @@ Firefox. Sources: AMO listings, project GitHub pages, category guides.
 | Quick capture hotkey | many capture tools | **Shipped in v0.7** (Ctrl+Shift+Y). |
 | Bulk import of files | most note apps | **Shipped in v0.7** (.md / .txt). |
 | Print / PDF a note | most note apps | **Shipped in v0.7** (browser print, no permissions). |
+| Folders / notebooks / projects | Bear, Evernote, Claude, ChatGPT | **Shipped in v0.9** (navigable single-level folders, emoji + palette color; tags stay cross-cutting). |
 | Page highlighting / sticky notes overlaid on pages | Web Highlights, Notefox | **Deliberate non-goal**: requires content scripts injected into every page — exactly the access Quiet Notes promises never to ask for. |
 | Web clipping into cloud services | Evernote / Zoho clippers | **Non-goal** (cloud accounts). Our right-click "save selection" covers the lightweight case with zero page access. |
 | AI summaries | Web Highlights | **Non-goal**: would require sending page/note content to a remote service. |

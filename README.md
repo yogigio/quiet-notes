@@ -27,6 +27,8 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Trash with undo**: deleted notes are recoverable for 30 days
 - **Templates**: mark any note as a template, create new notes from it
 - Adjustable note text size and a monospace option
+- **Folders**: organize notes into color- and emoji-tagged folders you
+  navigate into (like Claude/ChatGPT projects); tags stay cross-cutting
 - **Site notes** (optional): link a note to the site you're on and it
   surfaces on top of the list when you return. Off by default — enabling
   it requests the `tabs` permission at runtime (hostname only, revoked

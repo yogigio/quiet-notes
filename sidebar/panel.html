@@ -18,6 +18,7 @@
   </header>
 
   <main id="list-view">
+    <div id="folder-section" hidden></div>
     <ul id="note-list"></ul>
     <div id="empty-hint" hidden>
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg>
@@ -52,6 +53,7 @@
       </button>
       <div id="more-menu" class="menu" hidden>
         <button id="menu-copy">Copy note text</button>
+        <button id="menu-folder">Move to folder…</button>
         <button id="menu-duplicate">Duplicate note</button>
         <button id="menu-print">Print note…</button>
         <button id="menu-template">Use as template</button>
@@ -208,6 +210,34 @@
   <div id="undo-toast" hidden>
     <span>Note moved to trash</span>
     <button id="undo-btn">Undo</button>
+  </div>
+
+  <div id="folder-edit" class="sheet" hidden>
+    <div class="sheet-card">
+      <strong id="folder-edit-title" class="sheet-title">New folder</strong>
+      <input id="folder-name" type="text" placeholder="Folder name" maxlength="40" autocomplete="off">
+      <div class="field-label">Icon</div>
+      <div id="folder-emoji-grid" class="emoji-grid"></div>
+      <div class="field-label">Color</div>
+      <div id="folder-color-row" class="color-row"></div>
+      <div class="sheet-actions">
+        <button id="folder-delete" class="danger-btn" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button id="folder-cancel">Cancel</button>
+        <button id="folder-save" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="folder-picker" class="sheet" hidden>
+    <div class="sheet-card">
+      <strong class="sheet-title">Move to folder</strong>
+      <div id="folder-picker-list"></div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button id="folder-picker-cancel">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <footer id="bottombar">

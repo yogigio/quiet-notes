@@ -7,6 +7,7 @@
 // history is local-only and therefore free of the storage.sync quota.
 
 const PREFIX = "note:";
+const FOLDER_PREFIX = "folder:";
 const HISTORY_PREFIX = "history:";
 const HISTORY_LIMIT = 50;
 
@@ -22,6 +23,39 @@ export function newNote() {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+// ---- Folders ----
+// Folder records live under "folder:<id>". They sync alongside notes; each
+// note optionally carries a folderId. See background.js for the mirror.
+
+export function newFolder() {
+  const now = Date.now();
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    icon: "📁",
+    color: "blue",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function loadFolders() {
+  const everything = await browser.storage.local.get(null);
+  const folders = {};
+  for (const [key, value] of Object.entries(everything)) {
+    if (key.startsWith(FOLDER_PREFIX)) folders[value.id] = value;
+  }
+  return folders;
+}
+
+export async function saveFolder(folder) {
+  await browser.storage.local.set({ [FOLDER_PREFIX + folder.id]: folder });
+}
+
+export async function deleteFolder(id) {
+  await browser.storage.local.remove(FOLDER_PREFIX + id);
 }
 
 export async function loadSettings() {
@@ -90,6 +124,12 @@ export async function importNotes(imported) {
 export function onExternalChange(callback) {
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (Object.keys(changes).some((key) => key.startsWith(PREFIX))) callback();
+    if (
+      Object.keys(changes).some(
+        (key) => key.startsWith(PREFIX) || key.startsWith(FOLDER_PREFIX)
+      )
+    ) {
+      callback();
+    }
   });
 }

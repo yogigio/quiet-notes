@@ -15,11 +15,11 @@ end-to-end encryption — no third-party or first-party servers, ever.
   toolbar button, the context menu, the quick-capture command, and the
   sync engine.
 - **Persistence:** each note is stored under its own `storage.local` key
-  (`note:<id>`). Per-note keys keep writes small, make `storage.onChanged`
-  events precise, and map 1:1 onto sync mirroring. Sibling namespaces that
-  are intentionally **not** synced (the mirror only copies `note:` keys):
-  `history:<id>` (version snapshots), `settings`, `oversized`,
-  `quickCapture`.
+  (`note:<id>`); folders under `folder:<id>`. Per-record keys keep writes
+  small, make `storage.onChanged` events precise, and map 1:1 onto sync
+  mirroring. Sibling namespaces that are intentionally **not** synced (the
+  mirror only copies `note:`/`folder:` keys): `history:<id>` (version
+  snapshots), `settings`, `oversized`, `quickCapture`.
 - **No build step.** Vanilla ES modules, loaded directly by the sidebar page.
   The shipped code is the source code — trivially auditable, and AMO review
   needs no source submission.
@@ -35,9 +35,14 @@ end-to-end encryption — no third-party or first-party servers, ever.
   }
   ```
 
-  Future fields (tags, language, type) must be additive and optional so old
-  exports always import cleanly. `format` in the export envelope is the
-  migration handle.
+  Optional fields added over time (all additive, so old exports import
+  cleanly): `tags`, `lang`, `glossary`, `pinned`, `template`, `deletedAt`,
+  `site`, `folderId`. `format` in the export envelope is the migration
+  handle; the JSON export also carries a `folders` array.
+
+  **Folder model:** `{ id, name, icon (emoji), color (palette key),
+  createdAt, updatedAt }`. A note belongs to at most one folder via
+  `folderId`; tags remain the cross-cutting axis.
 
 ## Sync design (implemented in background.js)
 
@@ -67,6 +72,11 @@ end-to-end encryption — no third-party or first-party servers, ever.
   one device turning sync off (which clears its mirror) can never delete
   notes on another device. An edit newer than a tombstone wins and revives
   the note. Tombstones are pruned after 30 days during full syncs.
+- The engine is record-kind-generic (v0.9): the same push/pull/tombstone
+  machinery mirrors both notes (`note:`/`tomb:`) and folders
+  (`folder:`/`ftomb:`), selected by prefix. Deleting a folder locally
+  unfiles its notes (clears `folderId`, which syncs as note updates) and
+  tombstones the folder record.
 - Full two-way merge runs when sync is enabled and on browser startup;
   incremental pushes/pulls ride `storage.onChanged` in the event page, so
   sync works with the sidebar closed.
@@ -219,6 +229,23 @@ so the innerHTML-safety invariant is unchanged.
   `scroll-behavior: smooth` — `scrollTo({behavior:"smooth"})` proved a
   no-op in some engines. Keyboard Ctrl+Home / Ctrl+End already cover the
   textarea; this adds a discoverable, mode-agnostic affordance.
+
+### v0.9 — folders / projects (shipped)
+
+- Notes organize into **folders** (like Claude/ChatGPT projects), a
+  navigable container rather than a filter. Home shows a Folders section
+  above the full notes list; tapping a folder opens a folder view (colored
+  header, back arrow) showing only its notes; the **+ inside a folder
+  files the new note there**. Search stays global on Home and scopes to
+  the folder when inside one.
+- Each folder has a user-chosen **emoji icon** (curated grid incl. flags,
+  zero assets, works offline) and a **color** from a curated 10-swatch
+  palette (theme-aware). Filed notes show a colored folder chip on Home.
+- A note belongs to one folder (`folderId`); **tags stay cross-cutting.**
+  Move via the editor ⋯ → "Move to folder…" picker (Unfiled / any folder /
+  New folder). Deleting a folder unfiles its notes rather than deleting
+  them. Folders are single-level (no nesting) and sync like notes.
+- No new permissions. JSON export/import now includes folders.
 
 ### v1.0 — release
 

@@ -2,30 +2,49 @@
 //
 // Responsibilities:
 //   1. Toolbar button toggles the sidebar.
-//   2. "Save selection" context menu appends the selection to an Inbox note.
-//   3. Optional sync engine: mirrors storage.local (the source of truth)
+//   2. Quick-capture command opens the sidebar and flags a new note.
+//   3. "Save selection" context menu appends the selection to an Inbox note.
+//   4. Optional sync engine: mirrors storage.local (the source of truth)
 //      into storage.sync while the user has sync turned on. Firefox Sync
 //      transports the mirror end-to-end encrypted; this code never talks
 //      to any server.
 //
-// Sync mirror layout (see docs/DESIGN.md):
-//   "note:<id>"    header { id, updatedAt, chunkCount, gz }
-//   "note:<id>#N"  chunk N of the note: gzip+base64 when gz is true
-//                  (raw JSON when compression wouldn't help, or for
-//                  mirrors written before v0.6.1)
-//   "tomb:<id>"    deletion marker (timestamp)
+// Two record kinds are mirrored, each in its own namespace: notes
+// ("note:<id>", tombstone "tomb:<id>") and folders ("folder:<id>",
+// tombstone "ftomb:<id>"). history:*, settings, oversized and quickCapture
+// are intentionally local-only and never synced.
+//
+// Mirror layout per record (see docs/DESIGN.md):
+//   "<prefix><id>"    header { id, updatedAt, chunkCount, gz }
+//   "<prefix><id>#N"  chunk N: gzip+base64 when gz, else raw JSON
+//   "<tomb><id>"      deletion marker (timestamp)
 //
 // Safety rule: key *removals* arriving from sync are ignored unless a
 // tombstone exists. Turning sync off on one device clears its mirror, and
-// that must never delete notes on another device.
+// that must never delete records on another device.
 
-const NOTE_PREFIX = "note:";
-const TOMB_PREFIX = "tomb:";
 const CHUNK_SIZE = 6000; // chars per item, safely under the 8 KB item quota
 const TOMB_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const local = browser.storage.local;
 const sync = browser.storage.sync;
+
+// Record kinds mirrored to storage.sync. `track` enables the oversized-note
+// list shown in settings (only meaningful for notes).
+const KINDS = [
+  { prefix: "note:", tomb: "tomb:", track: true },
+  { prefix: "folder:", tomb: "ftomb:", track: false },
+];
+
+function kindForKey(key) {
+  return KINDS.find((k) => key.startsWith(k.prefix)) || null;
+}
+
+function kindForTomb(key) {
+  if (key.startsWith("ftomb:")) return KINDS[1];
+  if (key.startsWith("tomb:")) return KINDS[0];
+  return null;
+}
 
 // ---- Toolbar button ----
 
@@ -65,7 +84,7 @@ async function appendToInbox(text) {
   const everything = await local.get(null);
   const found = Object.entries(everything).find(
     ([key, value]) =>
-      key.startsWith(NOTE_PREFIX) && value.inbox && !value.deletedAt
+      key.startsWith("note:") && value.inbox && !value.deletedAt
   );
   const now = Date.now();
   const inbox = found
@@ -83,7 +102,7 @@ async function appendToInbox(text) {
       };
   inbox.body = inbox.body.replace(/\n*$/, "\n\n") + text;
   inbox.updatedAt = now;
-  await local.set({ [NOTE_PREFIX + inbox.id]: inbox });
+  await local.set({ ["note:" + inbox.id]: inbox });
 }
 
 // ---- Sync engine ----
@@ -93,8 +112,8 @@ async function syncEnabled() {
   return Boolean(settings && settings.syncEnabled);
 }
 
-function chunkKeysFor(id, count) {
-  return Array.from({ length: count }, (_, i) => `${NOTE_PREFIX}${id}#${i}`);
+function chunkKeysFor(prefix, id, count) {
+  return Array.from({ length: count }, (_, i) => `${prefix}${id}#${i}`);
 }
 
 // Compression roughly halves-to-thirds typical text (more for non-Latin
@@ -121,14 +140,14 @@ async function gunzipFromBase64(base64) {
   return new Response(stream).text();
 }
 
-async function pushNote(note) {
-  const headerKey = NOTE_PREFIX + note.id;
+async function pushRecord(kind, record) {
+  const headerKey = kind.prefix + record.id;
   const existing = (await sync.get(headerKey))[headerKey];
-  if (existing && existing.updatedAt >= note.updatedAt) return;
+  if (existing && existing.updatedAt >= record.updatedAt) return;
 
-  const json = JSON.stringify(note);
+  const json = JSON.stringify(record);
   const compressed = await gzipToBase64(json);
-  // Tiny notes can come out larger after gzip+base64; store those raw.
+  // Tiny records can come out larger after gzip+base64; store those raw.
   const gz = compressed.length < new TextEncoder().encode(json).length;
   const text = gz ? compressed : json;
   const chunks = [];
@@ -137,8 +156,8 @@ async function pushNote(note) {
   }
   const payload = {
     [headerKey]: {
-      id: note.id,
-      updatedAt: note.updatedAt,
+      id: record.id,
+      updatedAt: record.updatedAt,
       chunkCount: chunks.length,
       gz,
     },
@@ -148,53 +167,56 @@ async function pushNote(note) {
   try {
     await sync.set(payload);
     if (existing && existing.chunkCount > chunks.length) {
-      await sync.remove(chunkKeysFor(note.id, existing.chunkCount).slice(chunks.length));
+      await sync.remove(
+        chunkKeysFor(kind.prefix, record.id, existing.chunkCount).slice(chunks.length)
+      );
     }
-    await markOversized(note.id, false);
+    if (kind.track) await markOversized(record.id, false);
   } catch (error) {
     // Typically quota exhaustion. The local save already happened; the note
     // simply stays local-only and is listed in the settings pane.
-    await markOversized(note.id, true);
+    if (kind.track) await markOversized(record.id, true);
   }
 }
 
-async function pullNote(id) {
-  const headerKey = NOTE_PREFIX + id;
+async function pullRecord(kind, id) {
+  const headerKey = kind.prefix + id;
   const header = (await sync.get(headerKey))[headerKey];
   if (!header) return;
-  const keys = chunkKeysFor(id, header.chunkCount);
+  const keys = chunkKeysFor(kind.prefix, id, header.chunkCount);
   const got = await sync.get(keys);
-  let note;
+  let record;
   try {
     const joined = keys.map((key) => got[key]).join("");
-    note = JSON.parse(header.gz ? await gunzipFromBase64(joined) : joined);
+    record = JSON.parse(header.gz ? await gunzipFromBase64(joined) : joined);
   } catch {
     return; // partial write still in flight; a later change event retries
   }
   const current = (await local.get(headerKey))[headerKey];
-  if (current && current.updatedAt >= note.updatedAt) return;
-  await local.set({ [headerKey]: note });
+  if (current && current.updatedAt >= record.updatedAt) return;
+  await local.set({ [headerKey]: record });
 }
 
-async function writeTombstone(id) {
-  const headerKey = NOTE_PREFIX + id;
-  const got = await sync.get([headerKey, TOMB_PREFIX + id]);
-  if (got[TOMB_PREFIX + id]) return;
+async function writeTombstone(kind, id) {
+  const headerKey = kind.prefix + id;
+  const tombKey = kind.tomb + id;
+  const got = await sync.get([headerKey, tombKey]);
+  if (got[tombKey]) return;
   const header = got[headerKey];
   if (header) {
-    await sync.remove([headerKey, ...chunkKeysFor(id, header.chunkCount)]);
+    await sync.remove([headerKey, ...chunkKeysFor(kind.prefix, id, header.chunkCount)]);
   }
-  await sync.set({ [TOMB_PREFIX + id]: Date.now() });
+  await sync.set({ [tombKey]: Date.now() });
 }
 
-async function applyTombstone(id, time) {
-  const headerKey = NOTE_PREFIX + id;
+async function applyTombstone(kind, id, time) {
+  const headerKey = kind.prefix + id;
   const current = (await local.get(headerKey))[headerKey];
   if (!current) return;
   if (current.updatedAt > time) {
-    // The note was edited after being deleted elsewhere: the edit wins.
-    await sync.remove(TOMB_PREFIX + id);
-    await pushNote(current);
+    // The record was edited after being deleted elsewhere: the edit wins.
+    await sync.remove(kind.tomb + id);
+    await pushRecord(kind, current);
   } else {
     await local.remove(headerKey);
   }
@@ -215,22 +237,27 @@ async function fullSync() {
   const now = Date.now();
 
   for (const [key, time] of Object.entries(remote)) {
-    if (!key.startsWith(TOMB_PREFIX)) continue;
-    await applyTombstone(key.slice(TOMB_PREFIX.length), time);
+    const kind = kindForTomb(key);
+    if (!kind) continue;
+    await applyTombstone(kind, key.slice(kind.tomb.length), time);
     if (now - time > TOMB_TTL_MS) await sync.remove(key);
   }
 
   for (const [key, header] of Object.entries(remote)) {
-    if (!key.startsWith(NOTE_PREFIX) || key.includes("#")) continue;
+    const kind = kindForKey(key);
+    if (!kind || key.includes("#")) continue;
     const current = everything[key];
-    if (!current || header.updatedAt > current.updatedAt) await pullNote(header.id);
+    if (!current || header.updatedAt > current.updatedAt) {
+      await pullRecord(kind, header.id);
+    }
   }
 
-  for (const [key, note] of Object.entries(everything)) {
-    if (!key.startsWith(NOTE_PREFIX)) continue;
-    const tomb = remote[TOMB_PREFIX + note.id];
-    if (tomb && tomb >= note.updatedAt) continue;
-    await pushNote(note);
+  for (const [key, record] of Object.entries(everything)) {
+    const kind = kindForKey(key);
+    if (!kind) continue;
+    const tomb = remote[kind.tomb + record.id];
+    if (tomb && tomb >= record.updatedAt) continue;
+    await pushRecord(kind, record);
   }
 }
 
@@ -251,21 +278,22 @@ browser.storage.onChanged.addListener(async (changes, area) => {
     }
     if (!(await syncEnabled())) return;
     for (const [key, change] of Object.entries(changes)) {
-      if (!key.startsWith(NOTE_PREFIX)) continue;
-      if (change.newValue) await pushNote(change.newValue);
-      else await writeTombstone(key.slice(NOTE_PREFIX.length));
+      const kind = kindForKey(key);
+      if (!kind) continue;
+      if (change.newValue) await pushRecord(kind, change.newValue);
+      else await writeTombstone(kind, key.slice(kind.prefix.length));
     }
   } else if (area === "sync") {
     if (!(await syncEnabled())) return;
     for (const [key, change] of Object.entries(changes)) {
-      if (key.startsWith(TOMB_PREFIX) && change.newValue) {
-        await applyTombstone(key.slice(TOMB_PREFIX.length), change.newValue);
-      } else if (
-        key.startsWith(NOTE_PREFIX) &&
-        !key.includes("#") &&
-        change.newValue
-      ) {
-        await pullNote(change.newValue.id);
+      const tombKind = kindForTomb(key);
+      if (tombKind && change.newValue) {
+        await applyTombstone(tombKind, key.slice(tombKind.tomb.length), change.newValue);
+        continue;
+      }
+      const kind = kindForKey(key);
+      if (kind && !key.includes("#") && change.newValue) {
+        await pullRecord(kind, change.newValue.id);
       }
     }
   }

@@ -9,6 +9,10 @@ import {
   saveSettings,
   loadHistory,
   pushHistory,
+  newFolder,
+  loadFolders,
+  saveFolder,
+  deleteFolder,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -20,6 +24,7 @@ const ui = {
   newNote: $("new-note"),
   newMenu: $("new-menu"),
   listView: $("list-view"),
+  folderSection: $("folder-section"),
   noteList: $("note-list"),
   emptyHint: $("empty-hint"),
   editorView: $("editor-view"),
@@ -74,6 +79,18 @@ const ui = {
   emptyTrash: $("empty-trash"),
   undoToast: $("undo-toast"),
   undoBtn: $("undo-btn"),
+  menuFolder: $("menu-folder"),
+  folderEdit: $("folder-edit"),
+  folderEditTitle: $("folder-edit-title"),
+  folderName: $("folder-name"),
+  folderEmojiGrid: $("folder-emoji-grid"),
+  folderColorRow: $("folder-color-row"),
+  folderDelete: $("folder-delete"),
+  folderCancel: $("folder-cancel"),
+  folderSave: $("folder-save"),
+  folderPicker: $("folder-picker"),
+  folderPickerList: $("folder-picker-list"),
+  folderPickerCancel: $("folder-picker-cancel"),
   exportMd: $("export-md"),
   importText: $("import-text"),
   importTextFile: $("import-text-file"),
@@ -86,6 +103,11 @@ const ui = {
 };
 
 let notes = {};
+let folders = {};
+let currentFolderId = null; // null = Home
+let editingFolderId = null; // folder being edited in the sheet (null = new)
+let draftIcon = "📁";
+let draftColor = "blue";
 let settings = { syncEnabled: false };
 let currentId = null;
 let mode = "write";
@@ -106,6 +128,26 @@ const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
 const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FONT_SIZES = { s: "13px", m: "14.5px", l: "16.5px" };
+
+// Curated modern palette (readable on light and dark as an accent/dot).
+const FOLDER_COLORS = {
+  gray: "#6b7280",
+  red: "#e5484d",
+  orange: "#f76b15",
+  amber: "#f5a623",
+  green: "#30a46c",
+  teal: "#12a594",
+  blue: "#3e63dd",
+  cyan: "#05a2c2",
+  violet: "#6e56cf",
+  pink: "#d6409f",
+};
+const FOLDER_EMOJI = [
+  "📁", "📂", "🗂️", "⭐", "📌", "💼", "📚", "📖",
+  "📝", "🌐", "⚖️", "🗣️", "✏️", "🔖", "🧾", "💡",
+  "🇩🇪", "🇬🇧", "🇺🇸", "🇫🇷", "🇪🇸", "🇮🇹", "🇷🇺", "🇬🇪",
+];
+const colorHex = (key) => FOLDER_COLORS[key] || FOLDER_COLORS.blue;
 // Don't snapshot on every keystroke: keep the version the note had when
 // opened, then at most one snapshot per this interval while editing.
 const SNAPSHOT_MIN_GAP_MS = 2 * 60 * 1000;
@@ -124,6 +166,8 @@ const ICON_BOOK =
   "M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5";
 const ICON_TPL =
   "M5.5 5.5h7v7h-7z M3 10.5V4.5A1.5 1.5 0 0 1 4.5 3H10";
+const ICON_CHEVRON = "M6.5 3.5 11 8l-4.5 4.5";
+const ICON_BACK = "M10 3.5 5.5 8l4.5 4.5";
 
 function svgIcon(pathData, filled) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -221,15 +265,133 @@ function startSiteTracking() {
   });
 }
 
+// ---- Folders ----
+
+function folderNoteCount(id) {
+  return Object.values(notes).filter(
+    (note) => !note.deletedAt && note.folderId === id
+  ).length;
+}
+
+function sortedFolders() {
+  return Object.values(folders).sort((a, b) =>
+    (a.name || "").localeCompare(b.name || "")
+  );
+}
+
+function openFolder(id) {
+  currentFolderId = id;
+  ui.search.value = "";
+  renderList();
+}
+
+function goHome() {
+  currentFolderId = null;
+  ui.search.value = "";
+  renderList();
+}
+
+// Home: a "Folders" section listing folders. Inside a folder: a colored
+// header with a back button. Hidden while searching on Home (search spans
+// all notes).
+function renderFolderSection() {
+  ui.folderSection.textContent = "";
+  const query = ui.search.value.trim();
+
+  if (currentFolderId) {
+    const folder = folders[currentFolderId];
+    if (!folder) {
+      currentFolderId = null;
+      return renderFolderSection();
+    }
+    ui.folderSection.hidden = false;
+    const bar = document.createElement("div");
+    bar.className = "folder-bar";
+    bar.style.setProperty("--fc", colorHex(folder.color));
+
+    const back = document.createElement("button");
+    back.className = "icon-btn";
+    back.title = "Back to all notes";
+    back.append(svgIcon(ICON_BACK));
+    back.addEventListener("click", goHome);
+
+    const accent = document.createElement("span");
+    accent.className = "folder-bar-accent";
+    const emoji = document.createElement("span");
+    emoji.className = "folder-emoji";
+    emoji.textContent = folder.icon || "📁";
+    const title = document.createElement("span");
+    title.className = "folder-title";
+    title.textContent = folder.name || "Untitled folder";
+
+    const edit = document.createElement("button");
+    edit.className = "icon-btn";
+    edit.title = "Edit folder";
+    edit.textContent = "✎";
+    edit.addEventListener("click", () => openFolderEdit(folder.id));
+
+    bar.append(back, accent, emoji, title, edit);
+    ui.folderSection.append(bar);
+    return;
+  }
+
+  if (query) {
+    ui.folderSection.hidden = true;
+    return;
+  }
+  ui.folderSection.hidden = false;
+
+  const head = document.createElement("div");
+  head.className = "folder-head";
+  head.append(document.createTextNode("Folders"));
+  const spacer = document.createElement("span");
+  spacer.className = "spacer";
+  const add = document.createElement("button");
+  add.className = "folder-add";
+  add.textContent = "+ New";
+  add.title = "New folder";
+  add.addEventListener("click", () => openFolderEdit(null));
+  head.append(spacer, add);
+  ui.folderSection.append(head);
+
+  for (const folder of sortedFolders()) {
+    const row = document.createElement("div");
+    row.className = "folder-row";
+    row.style.setProperty("--fc", colorHex(folder.color));
+    row.addEventListener("click", () => openFolder(folder.id));
+
+    const emoji = document.createElement("span");
+    emoji.className = "folder-emoji";
+    emoji.textContent = folder.icon || "📁";
+    const name = document.createElement("span");
+    name.className = "folder-name";
+    name.textContent = folder.name || "Untitled folder";
+    const count = document.createElement("span");
+    count.className = "folder-count";
+    count.textContent = String(folderNoteCount(folder.id));
+    const chevron = document.createElement("span");
+    chevron.className = "folder-chevron";
+    chevron.append(svgIcon(ICON_CHEVRON));
+
+    row.append(emoji, name, count, chevron);
+    ui.folderSection.append(row);
+  }
+}
+
 // ---- List view ----
 
 function renderList() {
+  renderFolderSection();
   const query = ui.search.value.trim().toLowerCase();
-  const visible = sortedNotes().filter((note) => matchesQuery(note, query));
+  const visible = sortedNotes().filter(
+    (note) =>
+      (currentFolderId ? note.folderId === currentFolderId : true) &&
+      matchesQuery(note, query)
+  );
 
   ui.noteList.textContent = "";
   const siteGroup =
-    sitePermission && currentHost
+    !currentFolderId && sitePermission && currentHost
       ? visible.filter((note) => note.site === currentHost)
       : [];
   if (siteGroup.length) {
@@ -243,6 +405,12 @@ function renderList() {
     for (const note of visible) appendCard(note);
   }
 
+  if (!visible.length && currentFolderId) {
+    const p = document.createElement("p");
+    p.className = "hint folder-empty";
+    p.textContent = "No notes in this folder yet.";
+    ui.noteList.append(p);
+  }
   ui.emptyHint.hidden = sortedNotes().length > 0;
 }
 
@@ -292,6 +460,14 @@ function appendCard(note) {
   const time = document.createElement("span");
   time.textContent = relativeTime(note.updatedAt);
   meta.append(time);
+  if (!currentFolderId && note.folderId && folders[note.folderId]) {
+    const folder = folders[note.folderId];
+    const chip = document.createElement("span");
+    chip.className = "folder-chip";
+    chip.style.setProperty("--fc", colorHex(folder.color));
+    chip.textContent = `${folder.icon || "📁"} ${folder.name || "Folder"}`;
+    meta.append(chip);
+  }
   for (const tag of (note.tags || []).slice(0, 3)) {
     const chip = document.createElement("button");
     chip.className = "tag-chip";
@@ -521,6 +697,7 @@ async function openEditor(id) {
   ui.menuTemplate.textContent = note.template
     ? "Stop using as template"
     : "Use as template";
+  refreshFolderMenuItem();
   renderGlossaryControls(note);
   closeFind();
   ui.historyPanel.hidden = true;
@@ -539,7 +716,10 @@ async function createNote(template) {
     note.tags = [...(template.tags || [])];
     note.lang = template.lang || "";
     note.glossary = Boolean(template.glossary);
+    if (template.folderId) note.folderId = template.folderId;
   }
+  // A new note started while inside a folder is filed there.
+  if (!note.folderId && currentFolderId) note.folderId = currentFolderId;
   notes[note.id] = note;
   await saveNote(note);
   await openEditor(note.id);
@@ -834,6 +1014,185 @@ function openSettings() {
   renderTrash();
 }
 
+// ---- Folder create / edit / move ----
+
+let pendingMoveNoteId = null;
+let folderDeleteArmed = 0;
+
+function buildFolderControls() {
+  ui.folderEmojiGrid.textContent = "";
+  for (const emoji of FOLDER_EMOJI) {
+    const b = document.createElement("button");
+    b.textContent = emoji;
+    b.dataset.emoji = emoji;
+    b.addEventListener("click", () => {
+      draftIcon = emoji;
+      markFolderControlSelection();
+    });
+    ui.folderEmojiGrid.append(b);
+  }
+  ui.folderColorRow.textContent = "";
+  for (const key of Object.keys(FOLDER_COLORS)) {
+    const b = document.createElement("button");
+    b.dataset.color = key;
+    b.title = key;
+    b.style.setProperty("--sw", FOLDER_COLORS[key]);
+    b.addEventListener("click", () => {
+      draftColor = key;
+      markFolderControlSelection();
+    });
+    ui.folderColorRow.append(b);
+  }
+}
+
+function markFolderControlSelection() {
+  for (const c of ui.folderEmojiGrid.children) {
+    c.classList.toggle("sel", c.dataset.emoji === draftIcon);
+  }
+  for (const c of ui.folderColorRow.children) {
+    c.classList.toggle("sel", c.dataset.color === draftColor);
+  }
+}
+
+function openFolderEdit(id) {
+  editingFolderId = id;
+  closeMenus();
+  const folder = id ? folders[id] : null;
+  draftIcon = folder ? folder.icon || "📁" : "📁";
+  draftColor = folder ? folder.color || "blue" : "blue";
+  ui.folderName.value = folder ? folder.name || "" : "";
+  ui.folderEditTitle.textContent = folder ? "Edit folder" : "New folder";
+  ui.folderDelete.hidden = !folder;
+  ui.folderDelete.textContent = "Delete";
+  folderDeleteArmed = 0;
+  markFolderControlSelection();
+  ui.folderEdit.hidden = false;
+  ui.folderName.focus();
+}
+
+function closeFolderEdit() {
+  ui.folderEdit.hidden = true;
+  pendingMoveNoteId = null;
+}
+
+async function saveFolderFromSheet() {
+  const name = ui.folderName.value.trim();
+  let folder;
+  const isNew = !(editingFolderId && folders[editingFolderId]);
+  if (isNew) {
+    folder = newFolder();
+    folders[folder.id] = folder;
+  } else {
+    folder = folders[editingFolderId];
+  }
+  folder.name = name || "Untitled folder";
+  folder.icon = draftIcon;
+  folder.color = draftColor;
+  folder.updatedAt = Date.now();
+  await saveFolder(folder);
+
+  // Created via "New folder…" in the move picker: file the note here.
+  if (isNew && pendingMoveNoteId && notes[pendingMoveNoteId]) {
+    const note = notes[pendingMoveNoteId];
+    note.folderId = folder.id;
+    note.updatedAt = Date.now();
+    await saveNote(note);
+    refreshFolderMenuItem();
+  }
+  closeFolderEdit();
+  renderList();
+}
+
+async function deleteFolderFromSheet() {
+  const id = editingFolderId;
+  if (!id) return;
+  // Unfile the folder's notes so nothing is lost.
+  for (const note of Object.values(notes)) {
+    if (note.folderId === id) {
+      delete note.folderId;
+      note.updatedAt = Date.now();
+      await saveNote(note);
+    }
+  }
+  delete folders[id];
+  await deleteFolder(id);
+  if (currentFolderId === id) currentFolderId = null;
+  closeFolderEdit();
+  renderList();
+}
+
+function refreshFolderMenuItem() {
+  const note = notes[currentId];
+  if (!note) {
+    ui.menuFolder.hidden = true;
+    return;
+  }
+  ui.menuFolder.hidden = false;
+  const folder = note.folderId && folders[note.folderId];
+  ui.menuFolder.textContent = folder
+    ? `Folder: ${folder.name || "Untitled"}`
+    : "Move to folder…";
+}
+
+function openFolderPicker() {
+  closeMenus();
+  const note = notes[currentId];
+  if (!note) return;
+  ui.folderPickerList.textContent = "";
+
+  const makeRow = (label, emoji, folderId) => {
+    const b = document.createElement("button");
+    if ((note.folderId || null) === folderId) b.classList.add("sel");
+    const em = document.createElement("span");
+    em.className = "pk-emoji";
+    em.textContent = emoji;
+    const nm = document.createElement("span");
+    nm.className = "pk-name";
+    nm.textContent = label;
+    b.append(em, nm);
+    b.addEventListener("click", () => moveNoteToFolder(folderId));
+    return b;
+  };
+
+  ui.folderPickerList.append(makeRow("Unfiled", "🗒️", null));
+  for (const folder of sortedFolders()) {
+    ui.folderPickerList.append(
+      makeRow(folder.name || "Untitled folder", folder.icon || "📁", folder.id)
+    );
+  }
+  const nf = document.createElement("button");
+  const em = document.createElement("span");
+  em.className = "pk-emoji";
+  em.textContent = "＋";
+  const nm = document.createElement("span");
+  nm.className = "pk-name";
+  nm.textContent = "New folder…";
+  nf.append(em, nm);
+  nf.addEventListener("click", () => {
+    closeFolderPicker();
+    pendingMoveNoteId = currentId;
+    openFolderEdit(null);
+  });
+  ui.folderPickerList.append(nf);
+
+  ui.folderPicker.hidden = false;
+}
+
+function closeFolderPicker() {
+  ui.folderPicker.hidden = true;
+}
+
+async function moveNoteToFolder(folderId) {
+  const note = notes[currentId];
+  if (!note) return;
+  if (folderId) note.folderId = folderId;
+  else delete note.folderId;
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  refreshFolderMenuItem();
+  closeFolderPicker();
+}
+
 // ---- Export / import ----
 
 function download(content, type, filename) {
@@ -851,6 +1210,7 @@ function exportAll() {
     format: 1,
     exportedAt: new Date().toISOString(),
     notes: sortedNotes(),
+    folders: Object.values(folders),
   };
   download(
     JSON.stringify(payload, null, 2),
@@ -881,7 +1241,13 @@ async function importFromFile(file) {
     const payload = JSON.parse(await file.text());
     if (!Array.isArray(payload.notes)) throw new Error("no notes array");
     const { added, updated } = await importNotes(payload.notes);
-    notes = await loadNotes();
+    if (Array.isArray(payload.folders)) {
+      for (const folder of payload.folders) {
+        const existing = folders[folder.id];
+        if (!existing || folder.updatedAt > existing.updatedAt) await saveFolder(folder);
+      }
+    }
+    [notes, folders] = await Promise.all([loadNotes(), loadFolders()]);
     renderList();
     ui.import.textContent = `+${added} / ~${updated}`;
   } catch {
@@ -1196,7 +1562,41 @@ function refreshSiteMenuItem() {
 ui.more.addEventListener("click", (event) => {
   event.stopPropagation();
   refreshSiteMenuItem();
+  refreshFolderMenuItem();
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
+});
+
+ui.menuFolder.addEventListener("click", openFolderPicker);
+
+// Folder create/edit sheet.
+ui.folderSave.addEventListener("click", saveFolderFromSheet);
+ui.folderName.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveFolderFromSheet();
+  }
+});
+ui.folderCancel.addEventListener("click", closeFolderEdit);
+ui.folderDelete.addEventListener("click", async () => {
+  if (Date.now() > folderDeleteArmed) {
+    folderDeleteArmed = Date.now() + 3000;
+    ui.folderDelete.textContent = "Delete folder?";
+    setTimeout(() => {
+      if (Date.now() > folderDeleteArmed) ui.folderDelete.textContent = "Delete";
+    }, 3200);
+    return;
+  }
+  folderDeleteArmed = 0;
+  ui.folderDelete.textContent = "Delete";
+  await deleteFolderFromSheet();
+});
+ui.folderPickerCancel.addEventListener("click", closeFolderPicker);
+// Click on the dimmed backdrop (outside the card) closes the sheet.
+ui.folderEdit.addEventListener("click", (event) => {
+  if (event.target === ui.folderEdit) closeFolderEdit();
+});
+ui.folderPicker.addEventListener("click", (event) => {
+  if (event.target === ui.folderPicker) closeFolderPicker();
 });
 
 ui.menuSite.addEventListener("click", async () => {
@@ -1284,7 +1684,11 @@ ui.editor.addEventListener("keydown", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (!ui.findBar.hidden) {
+  if (!ui.folderEdit.hidden) {
+    closeFolderEdit();
+  } else if (!ui.folderPicker.hidden) {
+    closeFolderPicker();
+  } else if (!ui.findBar.hidden) {
     finishFind();
   } else if (!ui.historyPanel.hidden) {
     ui.historyPanel.hidden = true;
@@ -1507,6 +1911,7 @@ browser.storage.onChanged.addListener((changes, area) => {
 
 onExternalChange(async () => {
   notes = await loadNotes();
+  folders = await loadFolders();
   if (currentId && (!notes[currentId] || notes[currentId].deletedAt)) {
     openList();
   } else if (currentId) {
@@ -1526,7 +1931,12 @@ onExternalChange(async () => {
 // ---- Init ----
 
 (async function init() {
-  [notes, settings] = await Promise.all([loadNotes(), loadSettings()]);
+  [notes, settings, folders] = await Promise.all([
+    loadNotes(),
+    loadSettings(),
+    loadFolders(),
+  ]);
+  buildFolderControls();
   try {
     sitePermission = await browser.permissions.contains({ permissions: ["tabs"] });
   } catch {
