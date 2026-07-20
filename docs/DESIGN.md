@@ -213,7 +213,9 @@ so the innerHTML-safety invariant is unchanged.
   `scrollHeight`, so wrapping matches.
 - **Scroll to top / bottom.** A floating control (`#scroll-nav`) appears
   only when the active pane overflows and works in both Write (textarea)
-  and Preview (rendered div). Uses direct `scrollTop` assignment with CSS
+  and Preview (rendered div). It is context-aware: the up button hides at
+  the top, the down button hides at the bottom, both show in between
+  (updated on every scroll). Uses direct `scrollTop` assignment with CSS
   `scroll-behavior: smooth` — `scrollTo({behavior:"smooth"})` proved a
   no-op in some engines. Keyboard Ctrl+Home / Ctrl+End already cover the
   textarea; this adds a discoverable, mode-agnostic affordance.

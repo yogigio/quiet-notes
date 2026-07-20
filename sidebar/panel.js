@@ -1025,7 +1025,16 @@ function updateScrollNav() {
     return;
   }
   const el = activeScrollEl();
-  ui.scrollNav.hidden = el.scrollHeight <= el.clientHeight + 4;
+  const overflow = el.scrollHeight - el.clientHeight;
+  if (overflow <= 4) {
+    ui.scrollNav.hidden = true;
+    return;
+  }
+  ui.scrollNav.hidden = false;
+  // Show only the direction that leads somewhere: hide "up" at the top and
+  // "down" at the bottom, show both in between.
+  ui.scrollTop.hidden = el.scrollTop <= 4;
+  ui.scrollBottom.hidden = el.scrollTop >= overflow - 4;
 }
 
 // ---- Version history ----
@@ -1253,6 +1262,7 @@ ui.editor.addEventListener("input", () => {
 });
 ui.editor.addEventListener("scroll", () => {
   if (!ui.findBar.hidden) syncHighlightScroll();
+  updateScrollNav();
 });
 ui.tags.addEventListener("input", scheduleSave);
 ui.lang.addEventListener("input", () => {
