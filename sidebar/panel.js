@@ -773,6 +773,45 @@ function applyLinePrefix(transform) {
   notifyEdited();
 }
 
+// If `line` begins a list item, describe its marker: how many characters
+// the marker occupies and what the next item's marker should be. Task
+// items always continue unchecked; numbered items increment.
+function listMarker(line) {
+  let m = line.match(/^(\s*)- \[[ xX]\]\s/);
+  if (m) return { length: m[0].length, next: `${m[1]}- [ ] ` };
+  m = line.match(/^(\s*)([-*])\s/);
+  if (m) return { length: m[0].length, next: `${m[1]}${m[2]} ` };
+  m = line.match(/^(\s*)(\d+)([.)])\s/);
+  if (m) return { length: m[0].length, next: `${m[1]}${Number(m[2]) + 1}${m[3]} ` };
+  return null;
+}
+
+// Enter inside a list item continues the list; Enter on an empty item ends
+// it. Returns true if it handled the key.
+function handleListEnter() {
+  const el = ui.editor;
+  if (el.selectionStart !== el.selectionEnd) return false; // let ranges be default
+  const pos = el.selectionStart;
+  const value = el.value;
+  const lineStart = value.lastIndexOf("\n", pos - 1) + 1;
+  let lineEnd = value.indexOf("\n", pos);
+  if (lineEnd === -1) lineEnd = value.length;
+  const line = value.slice(lineStart, lineEnd);
+
+  const marker = listMarker(line);
+  if (!marker) return false;
+
+  if (line.slice(marker.length).trim() === "") {
+    // Empty item: remove the marker and end the list.
+    el.setRangeText("", lineStart, lineEnd, "end");
+  } else {
+    // Continue: split at the caret and prefix the new line.
+    el.setRangeText("\n" + marker.next, pos, pos, "end");
+  }
+  notifyEdited();
+  return true;
+}
+
 const toolbarActions = {
   bold: () => applyWrap("**"),
   italic: () => applyWrap("*"),
@@ -785,6 +824,13 @@ const toolbarActions = {
     applyLinePrefix((line) =>
       line.startsWith("- ") ? line.slice(2) : `- ${line}`
     ),
+  task: () =>
+    applyLinePrefix((line) => {
+      const done = line.match(/^- \[[ xX]\]\s+(.*)$/);
+      if (done) return done[1]; // already a task → back to plain text
+      const bullet = line.match(/^- (.*)$/);
+      return `- [ ] ${bullet ? bullet[1] : line}`;
+    }),
   ol: () =>
     applyLinePrefix((line, i) => {
       const stripped = line.replace(/^\d+[.)]\s+/, "");
@@ -1680,6 +1726,20 @@ ui.editor.addEventListener("keydown", (event) => {
     event.preventDefault();
     toolbarActions.italic();
   }
+});
+
+ui.editor.addEventListener("keydown", (event) => {
+  if (
+    event.key !== "Enter" ||
+    event.shiftKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    isGlossary()
+  ) {
+    return;
+  }
+  if (handleListEnter()) event.preventDefault();
 });
 
 document.addEventListener("keydown", (event) => {

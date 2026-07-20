@@ -247,6 +247,20 @@ so the innerHTML-safety invariant is unchanged.
   them. Folders are single-level (no nesting) and sync like notes.
 - No new permissions. JSON export/import now includes folders.
 
+### v0.9.1 — list ergonomics (shipped)
+
+Rather than a dedicated "list type" (rejected: plain `- [ ]` checklists
+already cover shopping/to-do lists, and a new note type wouldn't clear
+the bar the glossary type did), the existing checklist was polished as
+general editor behavior that helps every note:
+
+- A **checklist button** in the formatting toolbar toggles `- [ ] ` on
+  the selected line(s).
+- **Enter-continuation:** pressing Enter on a bullet, numbered, or task
+  line inserts the next marker (numbers increment, tasks continue
+  unchecked); Enter on an empty item removes the marker and ends the
+  list. Disabled in glossary notes. Still plain Markdown underneath.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

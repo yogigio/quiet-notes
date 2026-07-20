@@ -16,7 +16,9 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Save selection**: right-click selected text on any page → appended to a
   pinned Inbox note (the extension still has zero access to page content)
 - Per-note language for the spellcheck dictionary; RTL/mixed text handled
-- **Checklists**: `- [ ]` task lines become toggleable checkboxes in Preview
+- **Checklists** (great for shopping/to-do lists): a toolbar checklist
+  button, `- [ ]` items that toggle in Preview, and Enter continues the
+  list automatically (empty item ends it)
 - **Tables**: `| a | b |` pipe tables render in Preview and printouts
 - **Wiki-links**: `[[Note title]]` links notes together, with backlinks
 - **Version history**: earlier versions are snapshotted locally; restore anytime
