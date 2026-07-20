@@ -18,7 +18,7 @@ Firefox. Sources: AMO listings, project GitHub pages, category guides.
 | Note-to-note links / backlinks | Obsidian | **Shipped in v0.7** (`[[title]]` + backlinks). |
 | Markdown tables | most Markdown apps | **Shipped in v0.7**. |
 | Find in note | most editors | **Shipped in v0.7** (Ctrl+F). |
-| Quick capture hotkey | many capture tools | **Shipped in v0.7** (Ctrl+Alt+Shift+N). |
+| Quick capture hotkey | many capture tools | **Shipped in v0.7** (Ctrl+Shift+Y). |
 | Bulk import of files | most note apps | **Shipped in v0.7** (.md / .txt). |
 | Print / PDF a note | most note apps | **Shipped in v0.7** (browser print, no permissions). |
 | Page highlighting / sticky notes overlaid on pages | Web Highlights, Notefox | **Deliberate non-goal**: requires content scripts injected into every page — exactly the access Quiet Notes promises never to ask for. |

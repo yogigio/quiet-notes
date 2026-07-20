@@ -181,7 +181,7 @@ Eight features drawn from what mature note apps offer (see RESEARCH.md):
   appends a "Linked from" list of notes that reference the current one.
 - **Tables.** GitHub-style `| a | b |` pipe tables with a `---` separator
   row render in Preview (and in printouts). A lone pipe is not a table.
-- **Quick capture.** A `quick-capture` command (Ctrl+Alt+Shift+N) opens
+- **Quick capture.** A `quick-capture` command (Ctrl+Shift+Y) opens
   the sidebar and drops a `quickCapture` timestamp the panel reacts to,
   starting a blank note whether the sidebar was open or just launched.
 - **Find in note.** Ctrl+F (or the magnifier) opens an in-note find bar;
@@ -199,6 +199,24 @@ Eight features drawn from what mature note apps offer (see RESEARCH.md):
 The renderer (`markdown.js`) still escapes every line before emitting its
 own tags; wiki-link titles and table cells go through the same escaping,
 so the innerHTML-safety invariant is unchanged.
+
+### v0.8 — find highlighting & scroll navigation (shipped)
+
+- **All-matches highlighting for find.** A transparent backdrop
+  (`#find-highlight`) sits behind the editor textarea inside a shared
+  `#editor-wrap`; both use identical text metrics (padding, border,
+  font, `white-space: pre-wrap`, `scrollbar-gutter: stable`) so the
+  `<mark>` elements line up exactly behind the opaque characters. Every
+  match is highlighted, the current one emphasized; navigation scrolls
+  the current mark to center using its `offsetTop` in the backdrop.
+  Verified in-harness: backdrop and textarea report identical
+  `scrollHeight`, so wrapping matches.
+- **Scroll to top / bottom.** A floating control (`#scroll-nav`) appears
+  only when the active pane overflows and works in both Write (textarea)
+  and Preview (rendered div). Uses direct `scrollTop` assignment with CSS
+  `scroll-behavior: smooth` — `scrollTo({behavior:"smooth"})` proved a
+  no-op in some engines. Keyboard Ctrl+Home / Ctrl+End already cover the
+  textarea; this adds a discoverable, mode-agnostic affordance.
 
 ### v1.0 — release
 

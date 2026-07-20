@@ -51,8 +51,13 @@ const ui = {
   glossary: $("glossary"),
   toolbar: $("toolbar"),
   glossaryHint: $("glossary-hint"),
+  editorWrap: $("editor-wrap"),
+  findHighlight: $("find-highlight"),
   editor: $("editor"),
   preview: $("preview"),
+  scrollNav: $("scroll-nav"),
+  scrollTop: $("scroll-top"),
+  scrollBottom: $("scroll-bottom"),
   counts: $("counts"),
   saveState: $("save-state"),
   settingsView: $("settings-view"),
@@ -313,9 +318,11 @@ function isGlossary() {
 }
 
 function setMode(next) {
+  // Find operates on the textarea, so leave it when switching to Preview.
+  if (next === "preview" && !ui.findBar.hidden) closeFind();
   mode = next;
   const write = mode === "write";
-  ui.editor.hidden = !write;
+  ui.editorWrap.hidden = !write;
   ui.preview.hidden = write;
   ui.toolbar.hidden = !write || isGlossary();
   ui.glossaryHint.hidden =
@@ -328,6 +335,7 @@ function setMode(next) {
     flushSave();
     renderPreview();
   }
+  updateScrollNav();
 }
 
 function renderPreview() {
@@ -467,7 +475,7 @@ function wordCount(text) {
 function renderCounts() {
   const { selectionStart: s, selectionEnd: e, value } = ui.editor;
   const selected = e > s ? value.slice(s, e) : "";
-  if (selected && !ui.editor.hidden) {
+  if (selected && !ui.editorWrap.hidden) {
     ui.counts.textContent = `${wordCount(selected)} words · ${selected.length} chars selected`;
   } else {
     ui.counts.textContent = `${wordCount(value)} words · ${value.length} chars`;
@@ -915,6 +923,17 @@ function closeFind() {
   findMatches = [];
   findIndex = -1;
   ui.findCount.textContent = "";
+  ui.findHighlight.textContent = "";
+}
+
+// Close the find bar and drop the caret on the match that was current, so
+// the user can keep editing (or type over it) right where they searched.
+function finishFind() {
+  const start = findIndex >= 0 ? findMatches[findIndex] : null;
+  const len = ui.findInput.value.length;
+  closeFind();
+  ui.editor.focus();
+  if (start != null) ui.editor.setSelectionRange(start, start + len);
 }
 
 function runFind() {
@@ -931,8 +950,12 @@ function runFind() {
       from = at + needle.length;
     }
   }
-  if (findMatches.length) gotoMatch(0);
-  else updateFindCount();
+  if (findMatches.length) {
+    gotoMatch(0);
+  } else {
+    renderFindHighlight();
+    updateFindCount();
+  }
 }
 
 function updateFindCount() {
@@ -941,19 +964,68 @@ function updateFindCount() {
   else ui.findCount.textContent = `${findIndex + 1}/${findMatches.length}`;
 }
 
+// Paint a transparent copy of the note behind the textarea with every match
+// wrapped in <mark>; the opaque textarea text sits exactly on top, so the
+// marks read as highlights. escapeForHtml keeps note text out of raw HTML.
+function renderFindHighlight() {
+  const len = ui.findInput.value.length;
+  if (ui.findBar.hidden || !findMatches.length || !len) {
+    ui.findHighlight.textContent = "";
+    return;
+  }
+  const text = ui.editor.value;
+  let html = "";
+  let pos = 0;
+  findMatches.forEach((start, i) => {
+    html += escapeForHtml(text.slice(pos, start));
+    const cls = i === findIndex ? ' class="current"' : "";
+    html += `<mark${cls}>${escapeForHtml(text.slice(start, start + len))}</mark>`;
+    pos = start + len;
+  });
+  html += escapeForHtml(text.slice(pos));
+  ui.findHighlight.innerHTML = html;
+  syncHighlightScroll();
+}
+
+function syncHighlightScroll() {
+  ui.findHighlight.scrollTop = ui.editor.scrollTop;
+  ui.findHighlight.scrollLeft = ui.editor.scrollLeft;
+}
+
 function gotoMatch(index) {
-  if (!findMatches.length) return;
+  if (!findMatches.length) {
+    renderFindHighlight();
+    updateFindCount();
+    return;
+  }
   findIndex = (index + findMatches.length) % findMatches.length;
-  const start = findMatches[findIndex];
-  const end = start + ui.findInput.value.length;
-  // Select the match (highlights it) and approximate a scroll to it.
-  ui.editor.setSelectionRange(start, end);
-  const ratio = start / Math.max(1, ui.editor.value.length);
-  ui.editor.scrollTop = Math.max(
-    0,
-    ui.editor.scrollHeight * ratio - ui.editor.clientHeight / 2
-  );
+  renderFindHighlight();
+  // The backdrop mirrors the textarea's layout exactly, so the current
+  // mark's offset is the precise scroll target.
+  const current = ui.findHighlight.querySelector("mark.current");
+  if (current) {
+    ui.editor.scrollTop = Math.max(
+      0,
+      current.offsetTop - ui.editor.clientHeight / 2
+    );
+    syncHighlightScroll();
+  }
   updateFindCount();
+}
+
+// ---- Scroll to top / bottom ----
+
+function activeScrollEl() {
+  return ui.preview.hidden ? ui.editor : ui.preview;
+}
+
+function updateScrollNav() {
+  if (ui.editorView.hidden) {
+    ui.scrollNav.hidden = true;
+    return;
+  }
+  const el = activeScrollEl();
+  ui.scrollNav.hidden = el.scrollHeight <= el.clientHeight + 4;
 }
 
 // ---- Version history ----
@@ -1176,6 +1248,11 @@ ui.modePreview.addEventListener("click", () => setMode("preview"));
 ui.editor.addEventListener("input", () => {
   renderCounts();
   scheduleSave();
+  if (!ui.findBar.hidden) runFind();
+  updateScrollNav();
+});
+ui.editor.addEventListener("scroll", () => {
+  if (!ui.findBar.hidden) syncHighlightScroll();
 });
 ui.tags.addEventListener("input", scheduleSave);
 ui.lang.addEventListener("input", () => {
@@ -1198,8 +1275,7 @@ ui.editor.addEventListener("keydown", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (!ui.findBar.hidden) {
-    closeFind();
-    ui.editor.focus();
+    finishFind();
   } else if (!ui.historyPanel.hidden) {
     ui.historyPanel.hidden = true;
   } else if (!ui.editorView.hidden) {
@@ -1256,7 +1332,7 @@ ui.undoBtn.addEventListener("click", undoTrash);
 // Find in note.
 ui.findToggle.addEventListener("click", () => {
   if (ui.findBar.hidden) openFind();
-  else closeFind();
+  else finishFind();
 });
 ui.findInput.addEventListener("input", runFind);
 ui.findInput.addEventListener("keydown", (event) => {
@@ -1267,9 +1343,23 @@ ui.findInput.addEventListener("keydown", (event) => {
 });
 ui.findPrev.addEventListener("click", () => gotoMatch(findIndex - 1));
 ui.findNext.addEventListener("click", () => gotoMatch(findIndex + 1));
-ui.findClose.addEventListener("click", () => {
-  closeFind();
-  ui.editor.focus();
+ui.findClose.addEventListener("click", finishFind);
+
+// Scroll to top / bottom of the active pane. Direct scrollTop assignment
+// always works; CSS scroll-behavior: smooth animates it where supported
+// (and honors prefers-reduced-motion). scrollTo({behavior:"smooth"}) was
+// unreliable in some engines, so it is avoided.
+ui.scrollTop.addEventListener("click", () => {
+  activeScrollEl().scrollTop = 0;
+});
+ui.scrollBottom.addEventListener("click", () => {
+  const el = activeScrollEl();
+  el.scrollTop = el.scrollHeight;
+});
+ui.preview.addEventListener("scroll", updateScrollNav, { passive: true });
+window.addEventListener("resize", () => {
+  updateScrollNav();
+  if (!ui.findBar.hidden) renderFindHighlight();
 });
 ui.editor.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {

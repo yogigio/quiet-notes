@@ -478,23 +478,67 @@ svg {
   color: var(--text);
 }
 
-#editor {
+#editor-wrap {
+  position: relative;
   flex: 1;
-  width: auto;
+  display: flex;
   margin: 0 8px 8px;
+  min-height: 0;
+}
+
+/* The textarea and the highlight backdrop must share text metrics exactly
+   so the marks line up behind the characters. */
+#editor,
+#find-highlight {
+  box-sizing: border-box;
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  resize: none;
-  background: var(--surface);
-  color: var(--text);
   font: inherit;
   font-size: var(--note-font, 14.5px);
   line-height: 1.6;
+  tab-size: 4;
+  scrollbar-gutter: stable;
+}
+
+#editor {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
   transition: border-color 0.15s, box-shadow 0.15s;
+  scroll-behavior: smooth;
+}
+
+#find-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--surface);
+  color: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+#find-highlight mark {
+  color: transparent;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+#find-highlight mark.current {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 body.mono #editor,
+body.mono #find-highlight,
 body.mono #preview {
   font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
 }
@@ -506,6 +550,32 @@ body.mono #preview {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+
+/* ---- Scroll to top / bottom ---- */
+
+#scroll-nav {
+  position: absolute;
+  right: 16px;
+  bottom: 30px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+}
+
+#scroll-nav button {
+  width: 30px;
+  height: 28px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+#scroll-nav button:hover { background: var(--hover); color: var(--text); }
+#scroll-nav button + button { border-top: 1px solid var(--border); }
 
 #editor-status {
   display: flex;
@@ -627,6 +697,7 @@ body.mono #preview {
   font-size: var(--note-font, 14.5px);
   line-height: 1.65;
   unicode-bidi: plaintext;
+  scroll-behavior: smooth;
 }
 
 .md li.task { list-style: none; margin-left: -1.15em; }

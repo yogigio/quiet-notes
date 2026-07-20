@@ -20,8 +20,10 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Tables**: `| a | b |` pipe tables render in Preview and printouts
 - **Wiki-links**: `[[Note title]]` links notes together, with backlinks
 - **Version history**: earlier versions are snapshotted locally; restore anytime
-- **Find in note** (Ctrl+F), **quick capture** (Ctrl+Alt+Shift+N), and
-  single-note **print**
+- **Find in note** (Ctrl+F) with all matches highlighted; **quick capture**
+  (Ctrl+Shift+Y) and single-note **print**
+- **Scroll to top / bottom** buttons for long notes (Ctrl+Home / Ctrl+End
+  also work in the editor)
 - **Trash with undo**: deleted notes are recoverable for 30 days
 - **Templates**: mark any note as a template, create new notes from it
 - Adjustable note text size and a monospace option

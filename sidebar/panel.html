@@ -104,8 +104,16 @@
       <button id="glossary-hint-close" title="Hide this hint permanently" aria-label="Hide this hint permanently">×</button>
     </p>
 
-    <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…"></textarea>
+    <div id="editor-wrap">
+      <div id="find-highlight" dir="auto" aria-hidden="true"></div>
+      <textarea id="editor" dir="auto" spellcheck="true" placeholder="Type your note…"></textarea>
+    </div>
     <div id="preview" class="md" hidden></div>
+
+    <div id="scroll-nav" hidden>
+      <button id="scroll-top" title="Scroll to top (Ctrl+Home)" aria-label="Scroll to top">↑</button>
+      <button id="scroll-bottom" title="Scroll to bottom (Ctrl+End)" aria-label="Scroll to bottom">↓</button>
+    </div>
 
     <footer id="editor-status">
       <span id="counts"></span>
