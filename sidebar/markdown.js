@@ -6,7 +6,8 @@
 // Supported: # ## ### headings, **bold**, *italic*, ~~strike~~, `code`,
 // ``` fenced blocks, - / * bullets, - [ ] / - [x] task items (emitted with
 // data-line so the UI can toggle them back into the source), 1. numbered
-// lists, > quotes, --- rules, [text](https://link).
+// lists, > quotes, --- rules, [text](https://link), [[wiki links]] (emitted
+// with data-title for the UI to resolve), and | pipe | tables |.
 
 function escapeHtml(text) {
   return text
@@ -21,12 +22,55 @@ function inline(text) {
   return text
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(
+      /\[\[([^\][]+)\]\]/g,
+      '<a class="wikilink" data-title="$1">$1</a>'
+    )
+    .replace(
       /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
     )
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
     .replace(/~~([^~]+)~~/g, "<del>$1</del>");
+}
+
+// A table separator looks like "| --- | :--: |" (escaped text keeps the
+// pipes and dashes intact). Requires at least one dash and only the
+// pipe/dash/colon/space vocabulary.
+function isTableSeparator(line) {
+  const trimmed = line.trim();
+  return (
+    trimmed.includes("|") &&
+    trimmed.includes("-") &&
+    /^\|?[\s:|-]+\|?$/.test(trimmed)
+  );
+}
+
+function isTableRow(line) {
+  return line.includes("|") && line.trim() !== "";
+}
+
+// Split "| a | b |" into ["a", "b"], tolerating optional outer pipes.
+function tableCells(line) {
+  let trimmed = line.trim();
+  if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+  if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function renderTable(headerLine, bodyLines) {
+  const head = tableCells(headerLine);
+  const rows = bodyLines.map(tableCells);
+  const th = head.map((cell) => `<th>${inline(cell)}</th>`).join("");
+  const body = rows
+    .map((cells) => {
+      const tds = head
+        .map((_, i) => `<td>${inline(cells[i] || "")}</td>`)
+        .join("");
+      return `<tr>${tds}</tr>`;
+    })
+    .join("");
+  return `<table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 export function renderMarkdown(source) {
@@ -43,7 +87,9 @@ export function renderMarkdown(source) {
     list = null;
   };
 
-  for (const [lineNo, line] of lines.entries()) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
     if (line.startsWith("```")) {
       if (list === "code") close();
       else {
@@ -55,6 +101,25 @@ export function renderMarkdown(source) {
     }
     if (list === "code") {
       out.push(line);
+      continue;
+    }
+
+    // Table: a row followed by a separator row starts one.
+    if (
+      list !== "code" &&
+      isTableRow(line) &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      close();
+      const bodyLines = [];
+      let j = i + 2;
+      while (j < lines.length && isTableRow(lines[j]) && !isTableSeparator(lines[j])) {
+        bodyLines.push(lines[j]);
+        j++;
+      }
+      out.push(renderTable(line, bodyLines));
+      i = j - 1;
       continue;
     }
 
@@ -80,7 +145,7 @@ export function renderMarkdown(source) {
       if (task) {
         const checked = task[1] !== " " ? " checked" : "";
         out.push(
-          `<li class="task"><label><input type="checkbox" class="task-box" data-line="${lineNo}"${checked}> <span>${inline(task[2])}</span></label></li>`
+          `<li class="task"><label><input type="checkbox" class="task-box" data-line="${i}"${checked}> <span>${inline(task[2])}</span></label></li>`
         );
       } else {
         out.push(`<li>${inline(bullet[1])}</li>`);

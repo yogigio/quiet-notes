@@ -33,6 +33,16 @@ browser.action.onClicked.addListener(() => {
   browser.sidebarAction.toggle();
 });
 
+// ---- Quick capture (keyboard command) ----
+// Open the sidebar and leave a flag the panel picks up to start a new note.
+// sidebarAction.open() must run synchronously within the command gesture.
+
+browser.commands.onCommand.addListener((command) => {
+  if (command !== "quick-capture") return;
+  browser.sidebarAction.open();
+  local.set({ quickCapture: Date.now() });
+});
+
 // ---- Save selection to the Inbox note ----
 
 browser.runtime.onInstalled.addListener(async () => {

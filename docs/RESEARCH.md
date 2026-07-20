@@ -13,7 +13,14 @@ Firefox. Sources: AMO listings, project GitHub pages, category guides.
 | Note templates | larger note apps | **Shipped in v0.5** (any note can be marked as a template; + offers them). |
 | Checklists / to-dos | most note apps | **Shipped in v0.5** (`- [ ]` Markdown tasks, toggleable in Preview). |
 | Font / appearance settings | Note Sidebar (paper styles, colors) | **Shipped in v0.5** (font size S/M/L + monospace). Paper skins: not planned. |
-| Password-protected notes | Note Sidebar | Already on the roadmap ("master password", WebCrypto). Later. |
+| Password-protected notes | Note Sidebar | **Decided against** (owner, 2026-07-20): Firefox Sync already E2E-encrypts the mirror and disk security is the OS's job; a lost password would mean lost notes. |
+| Version history | Simplenote, Evernote | **Shipped in v0.7** (local-only snapshots, restore). |
+| Note-to-note links / backlinks | Obsidian | **Shipped in v0.7** (`[[title]]` + backlinks). |
+| Markdown tables | most Markdown apps | **Shipped in v0.7**. |
+| Find in note | most editors | **Shipped in v0.7** (Ctrl+F). |
+| Quick capture hotkey | many capture tools | **Shipped in v0.7** (Ctrl+Alt+Shift+N). |
+| Bulk import of files | most note apps | **Shipped in v0.7** (.md / .txt). |
+| Print / PDF a note | most note apps | **Shipped in v0.7** (browser print, no permissions). |
 | Page highlighting / sticky notes overlaid on pages | Web Highlights, Notefox | **Deliberate non-goal**: requires content scripts injected into every page — exactly the access Quiet Notes promises never to ask for. |
 | Web clipping into cloud services | Evernote / Zoho clippers | **Non-goal** (cloud accounts). Our right-click "save selection" covers the lightweight case with zero page access. |
 | AI summaries | Web Highlights | **Non-goal**: would require sending page/note content to a remote service. |
@@ -35,6 +42,9 @@ Firefox. Sources: AMO listings, project GitHub pages, category guides.
 
 1. ~~Trash, templates, checklists, editor prefs~~ → v0.5
 2. ~~Per-site notes via optional `tabs` permission~~ → v0.6
-3. Master password (WebCrypto, at-rest + in-mirror encryption)
+3. ~~History, wiki-links, tables, find, quick capture, bulk import,
+   selection stats, print~~ → v0.7
 4. Localization (en, ka), AMO release polish
 5. Android exploration (popup UI)
+
+Dropped: master password (owner decision — see the table).

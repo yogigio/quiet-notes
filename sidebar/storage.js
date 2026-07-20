@@ -1,8 +1,14 @@
 // Persistence layer. Every note lives in browser.storage.local under its own
 // key ("note:<id>") so a future sync mirror can copy notes individually
 // without touching unrelated data. storage.local never leaves this machine.
+//
+// Version-history snapshots live under "history:<id>". They are deliberately
+// kept out of the "note:" namespace so the sync engine never mirrors them:
+// history is local-only and therefore free of the storage.sync quota.
 
 const PREFIX = "note:";
+const HISTORY_PREFIX = "history:";
+const HISTORY_LIMIT = 50;
 
 export function newNote() {
   const now = Date.now();
@@ -41,7 +47,24 @@ export async function saveNote(note) {
 }
 
 export async function deleteNote(id) {
-  await browser.storage.local.remove(PREFIX + id);
+  await browser.storage.local.remove([PREFIX + id, HISTORY_PREFIX + id]);
+}
+
+// ---- Version history (local-only) ----
+
+export async function loadHistory(id) {
+  const key = HISTORY_PREFIX + id;
+  const got = await browser.storage.local.get(key);
+  return got[key] || [];
+}
+
+// Append a snapshot (newest last), trimming to the most recent HISTORY_LIMIT.
+export async function pushHistory(id, snapshot) {
+  const history = await loadHistory(id);
+  history.push(snapshot);
+  const trimmed = history.slice(-HISTORY_LIMIT);
+  await browser.storage.local.set({ [HISTORY_PREFIX + id]: trimmed });
+  return trimmed;
 }
 
 // Merge imported notes into storage. A note wins over an existing one with

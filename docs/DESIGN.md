@@ -10,11 +10,16 @@ end-to-end encryption — no third-party or first-party servers, ever.
 
 ## Architecture
 
-- **Manifest V3**, Firefox ≥ 115, `sidebar_action` panel. No background
-  script needed so far; everything runs in the sidebar page.
+- **Manifest V3**, Firefox ≥ 115, `sidebar_action` panel. The UI runs in
+  the sidebar page; a background event page (`background.js`) handles the
+  toolbar button, the context menu, the quick-capture command, and the
+  sync engine.
 - **Persistence:** each note is stored under its own `storage.local` key
   (`note:<id>`). Per-note keys keep writes small, make `storage.onChanged`
-  events precise, and map 1:1 onto sync mirroring later.
+  events precise, and map 1:1 onto sync mirroring. Sibling namespaces that
+  are intentionally **not** synced (the mirror only copies `note:` keys):
+  `history:<id>` (version snapshots), `settings`, `oversized`,
+  `quickCapture`.
 - **No build step.** Vanilla ES modules, loaded directly by the sidebar page.
   The shipped code is the source code — trivially auditable, and AMO review
   needs no source submission.
@@ -160,6 +165,41 @@ Sidebar, Tab Notes, Web Highlights, cloud clippers):
   user explicitly links. With the toggle off, the extension behaves
   exactly as before: no tab access at all.
 
+### v0.7 — power-user batch (shipped)
+
+Eight features drawn from what mature note apps offer (see RESEARCH.md):
+
+- **Version history.** Snapshots live under `history:<id>` in
+  `storage.local` — deliberately outside the `note:` namespace so the sync
+  engine never mirrors them: history is local-only and free of the sync
+  quota. The version a note had when opened is always snapshotted on the
+  first edit, then at most one snapshot per 2 minutes while editing
+  (capped at 50). A clock-icon panel lists versions newest-first; Restore
+  first snapshots the current state, so a restore is itself reversible.
+- **Wiki-links + backlinks.** `[[Title]]` renders as a link (emitted with
+  `data-title`); clicking opens the matching note or creates it. Preview
+  appends a "Linked from" list of notes that reference the current one.
+- **Tables.** GitHub-style `| a | b |` pipe tables with a `---` separator
+  row render in Preview (and in printouts). A lone pipe is not a table.
+- **Quick capture.** A `quick-capture` command (Ctrl+Alt+Shift+N) opens
+  the sidebar and drops a `quickCapture` timestamp the panel reacts to,
+  starting a blank note whether the sidebar was open or just launched.
+- **Find in note.** Ctrl+F (or the magnifier) opens an in-note find bar;
+  matches are selected/scrolled in the textarea with an n/m counter and
+  Enter / Shift+Enter to cycle.
+- **Bulk import.** Settings → "Import .md / .txt files" makes one note per
+  file; the filename becomes the title unless the file starts with a
+  heading.
+- **Selection stats.** The footer counter switches to the selection's
+  word/char count whenever text is selected in the editor.
+- **Print a note.** The ⋯ menu opens a self-contained, print-styled HTML
+  document (rendered Markdown, or the glossary table) in a new tab via a
+  blob URL and triggers the browser print dialog. No permissions.
+
+The renderer (`markdown.js`) still escapes every line before emitting its
+own tags; wiki-link titles and table cells go through the same escaping,
+so the innerHTML-safety invariant is unchanged.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)
@@ -169,9 +209,8 @@ Sidebar, Tab Notes, Web Highlights, cloud clippers):
 
 ### Later / maybe
 
-- Note-to-note links (`[[title]]`) with backlinks
-- Per-note version history (local snapshots, restore UI)
 - Full-history export (versioned snapshots)
+- Reminders (would need the `notifications` permission)
 
 ### Decided against (owner's call, 2026-07-20)
 

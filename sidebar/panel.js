@@ -7,6 +7,8 @@ import {
   onExternalChange,
   loadSettings,
   saveSettings,
+  loadHistory,
+  pushHistory,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -24,14 +26,26 @@ const ui = {
   back: $("back"),
   modeWrite: $("mode-write"),
   modePreview: $("mode-preview"),
+  findToggle: $("find-toggle"),
+  historyBtn: $("history-btn"),
   pin: $("pin"),
-  copyNote: $("copy-note"),
   delete: $("delete"),
   more: $("more"),
   moreMenu: $("more-menu"),
+  menuCopy: $("menu-copy"),
   menuDuplicate: $("menu-duplicate"),
+  menuPrint: $("menu-print"),
   menuTemplate: $("menu-template"),
   menuSite: $("menu-site"),
+  findBar: $("find-bar"),
+  findInput: $("find-input"),
+  findCount: $("find-count"),
+  findPrev: $("find-prev"),
+  findNext: $("find-next"),
+  findClose: $("find-close"),
+  historyPanel: $("history-panel"),
+  historyClose: $("history-close"),
+  historyList: $("history-list"),
   tags: $("tags"),
   lang: $("lang"),
   glossary: $("glossary"),
@@ -56,6 +70,9 @@ const ui = {
   undoToast: $("undo-toast"),
   undoBtn: $("undo-btn"),
   exportMd: $("export-md"),
+  importText: $("import-text"),
+  importTextFile: $("import-text-file"),
+  importTextStatus: $("import-text-status"),
   export: $("export"),
   import: $("import"),
   importFile: $("import-file"),
@@ -74,11 +91,19 @@ let toastTimer = null;
 let sitePermission = false;
 let currentHost = "";
 let siteTrackingStarted = false;
+let currentHistory = [];
+let lastSnapshotAt = 0;
+let findMatches = [];
+let findIndex = -1;
+let quickCaptureHandled = 0;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
 const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FONT_SIZES = { s: "13px", m: "14.5px", l: "16.5px" };
+// Don't snapshot on every keystroke: keep the version the note had when
+// opened, then at most one snapshot per this interval while editing.
+const SNAPSHOT_MIN_GAP_MS = 2 * 60 * 1000;
 
 const PLACEHOLDER_NOTE =
   "Type your note…\n\n**bold**  *italic*  `code`\n- list item\n# heading";
@@ -315,6 +340,59 @@ function renderPreview() {
     // Safe: renderMarkdown HTML-escapes all input before adding its own tags.
     ui.preview.innerHTML = renderMarkdown(ui.editor.value);
   }
+  renderBacklinks();
+}
+
+// Show which other notes link to this one via [[title]]. Built with DOM
+// nodes (textContent) so note titles never flow into innerHTML.
+function renderBacklinks() {
+  const note = notes[currentId];
+  if (!note) return;
+  const title = titleOf(note);
+  const linkers = Object.values(notes).filter(
+    (other) =>
+      other.id !== currentId &&
+      !other.deletedAt &&
+      hasWikiLinkTo(other.body, title)
+  );
+  if (!linkers.length) return;
+
+  const section = document.createElement("div");
+  section.className = "backlinks";
+  const heading = document.createElement("div");
+  heading.className = "backlinks-title";
+  heading.textContent = `Linked from ${linkers.length} note${linkers.length > 1 ? "s" : ""}`;
+  section.append(heading);
+  for (const linker of linkers) {
+    const row = document.createElement("button");
+    row.className = "backlink";
+    row.dataset.id = linker.id;
+    row.textContent = titleOf(linker);
+    section.append(row);
+  }
+  ui.preview.append(section);
+}
+
+function hasWikiLinkTo(body, title) {
+  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\[\\[\\s*${escaped}\\s*\\]\\]`, "i").test(body);
+}
+
+async function openByTitle(title) {
+  const wanted = title.trim().toLowerCase();
+  const match = Object.values(notes).find(
+    (note) => !note.deletedAt && titleOf(note).toLowerCase() === wanted
+  );
+  if (match) {
+    await openEditor(match.id);
+  } else {
+    // Follow a link to a note that doesn't exist yet by creating it.
+    const note = newNote();
+    note.body = title.trim();
+    notes[note.id] = note;
+    await saveNote(note);
+    await openEditor(note.id);
+  }
 }
 
 // Glossary lines are "source == translation" (or tab-separated, as pasted
@@ -382,10 +460,18 @@ function renderGlossaryControls(note) {
   ui.editor.placeholder = note.glossary ? PLACEHOLDER_GLOSSARY : PLACEHOLDER_NOTE;
 }
 
+function wordCount(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
 function renderCounts() {
-  const text = ui.editor.value;
-  const words = text.split(/\s+/).filter(Boolean).length;
-  ui.counts.textContent = `${words} words · ${text.length} chars`;
+  const { selectionStart: s, selectionEnd: e, value } = ui.editor;
+  const selected = e > s ? value.slice(s, e) : "";
+  if (selected && !ui.editor.hidden) {
+    ui.counts.textContent = `${wordCount(selected)} words · ${selected.length} chars selected`;
+  } else {
+    ui.counts.textContent = `${wordCount(value)} words · ${value.length} chars`;
+  }
 }
 
 function applyLang(value) {
@@ -410,11 +496,13 @@ function closeMenus() {
 function openList() {
   currentId = null;
   disarmDelete();
+  closeFind();
+  ui.historyPanel.hidden = true;
   showView("list");
   renderList();
 }
 
-function openEditor(id) {
+async function openEditor(id) {
   currentId = id;
   const note = notes[id];
   ui.editor.value = note.body;
@@ -426,6 +514,10 @@ function openEditor(id) {
     ? "Stop using as template"
     : "Use as template";
   renderGlossaryControls(note);
+  closeFind();
+  ui.historyPanel.hidden = true;
+  lastSnapshotAt = 0;
+  currentHistory = await loadHistory(id);
   showView("editor");
   ui.saveState.textContent = "";
   renderCounts();
@@ -442,7 +534,7 @@ async function createNote(template) {
   }
   notes[note.id] = note;
   await saveNote(note);
-  openEditor(note.id);
+  await openEditor(note.id);
 }
 
 // ---- Formatting toolbar ----
@@ -549,12 +641,34 @@ async function flushSave() {
     ui.saveState.textContent = "";
     return;
   }
+  await maybeSnapshot(note);
   note.body = body;
   note.tags = tags;
   note.lang = lang;
   note.updatedAt = Date.now();
   await saveNote(note);
   ui.saveState.textContent = "Saved";
+}
+
+// Record the note's state *before* this save into version history — the
+// first edit after opening always snapshots, then at most one snapshot per
+// SNAPSHOT_MIN_GAP_MS so a long editing session leaves a few useful points
+// rather than hundreds. Empty notes aren't worth snapshotting.
+async function maybeSnapshot(note) {
+  const now = Date.now();
+  if (lastSnapshotAt && now - lastSnapshotAt < SNAPSHOT_MIN_GAP_MS) return;
+  if (!note.body.trim()) {
+    lastSnapshotAt = now;
+    return;
+  }
+  lastSnapshotAt = now;
+  currentHistory = await pushHistory(note.id, {
+    body: note.body,
+    tags: [...(note.tags || [])],
+    lang: note.lang || "",
+    glossary: Boolean(note.glossary),
+    at: note.updatedAt,
+  });
 }
 
 // ---- Delete (two-step confirm, no modal) ----
@@ -768,6 +882,201 @@ async function importFromFile(file) {
   setTimeout(() => (ui.import.textContent = "Import"), 2500);
 }
 
+// Bulk import: one new note per .md/.txt file. The filename becomes the
+// title (as a heading) unless the file already starts with one.
+async function importTextFiles(files) {
+  let count = 0;
+  for (const file of files) {
+    const text = (await file.text()).replace(/\r\n/g, "\n");
+    const base = file.name.replace(/\.[^.]+$/, "");
+    const note = newNote();
+    if (!text.trim()) note.body = `# ${base}`;
+    else if (/^\s*#/.test(text)) note.body = text;
+    else note.body = `# ${base}\n\n${text}`.trimEnd();
+    notes[note.id] = note;
+    await saveNote(note);
+    count++;
+  }
+  return count;
+}
+
+// ---- Find in note ----
+
+function openFind() {
+  if (mode !== "write") setMode("write");
+  ui.findBar.hidden = false;
+  ui.findInput.focus();
+  ui.findInput.select();
+  runFind();
+}
+
+function closeFind() {
+  ui.findBar.hidden = true;
+  findMatches = [];
+  findIndex = -1;
+  ui.findCount.textContent = "";
+}
+
+function runFind() {
+  const term = ui.findInput.value;
+  findMatches = [];
+  findIndex = -1;
+  if (term) {
+    const hay = ui.editor.value.toLowerCase();
+    const needle = term.toLowerCase();
+    let from = 0;
+    let at;
+    while ((at = hay.indexOf(needle, from)) !== -1) {
+      findMatches.push(at);
+      from = at + needle.length;
+    }
+  }
+  if (findMatches.length) gotoMatch(0);
+  else updateFindCount();
+}
+
+function updateFindCount() {
+  if (!ui.findInput.value) ui.findCount.textContent = "";
+  else if (!findMatches.length) ui.findCount.textContent = "0/0";
+  else ui.findCount.textContent = `${findIndex + 1}/${findMatches.length}`;
+}
+
+function gotoMatch(index) {
+  if (!findMatches.length) return;
+  findIndex = (index + findMatches.length) % findMatches.length;
+  const start = findMatches[findIndex];
+  const end = start + ui.findInput.value.length;
+  // Select the match (highlights it) and approximate a scroll to it.
+  ui.editor.setSelectionRange(start, end);
+  const ratio = start / Math.max(1, ui.editor.value.length);
+  ui.editor.scrollTop = Math.max(
+    0,
+    ui.editor.scrollHeight * ratio - ui.editor.clientHeight / 2
+  );
+  updateFindCount();
+}
+
+// ---- Version history ----
+
+function openHistory() {
+  ui.historyPanel.hidden = false;
+  renderHistoryList();
+}
+
+function snapshotTitle(snap) {
+  const line = snap.body.split("\n").find((l) => l.trim() !== "");
+  return line ? line.trim().replace(/^#+\s*/, "").slice(0, 60) : "Empty note";
+}
+
+function renderHistoryList() {
+  ui.historyList.textContent = "";
+  if (!currentHistory.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "No earlier versions yet — they're captured as you edit.";
+    ui.historyList.append(p);
+    return;
+  }
+  // Newest first.
+  [...currentHistory].reverse().forEach((snap) => {
+    const row = document.createElement("div");
+    row.className = "history-row";
+    const info = document.createElement("div");
+    info.className = "history-info";
+    const when = document.createElement("span");
+    when.className = "history-when";
+    when.textContent = relativeTime(snap.at);
+    const preview = document.createElement("span");
+    preview.className = "history-preview";
+    preview.textContent = snapshotTitle(snap);
+    info.append(when, preview);
+    const restore = document.createElement("button");
+    restore.textContent = "Restore";
+    restore.addEventListener("click", () => restoreSnapshot(snap));
+    row.append(info, restore);
+    ui.historyList.append(row);
+  });
+}
+
+async function restoreSnapshot(snap) {
+  const note = notes[currentId];
+  // Capture the current state first so a restore is itself reversible.
+  lastSnapshotAt = 0;
+  await maybeSnapshot(note);
+  note.body = snap.body;
+  note.tags = [...(snap.tags || [])];
+  note.lang = snap.lang || "";
+  note.glossary = Boolean(snap.glossary);
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  ui.editor.value = note.body;
+  ui.tags.value = note.tags.join(", ");
+  ui.lang.value = note.lang;
+  applyLang(note.lang);
+  renderGlossaryControls(note);
+  renderCounts();
+  ui.historyPanel.hidden = true;
+  setMode("write");
+}
+
+// ---- Print a single note ----
+
+function escapeForHtml(s) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function glossaryToHtml(body) {
+  const rows = parseGlossary(body)
+    .map((r) =>
+      r.text
+        ? `<tr><td colspan="2" class="gt">${escapeForHtml(r.text)}</td></tr>`
+        : `<tr><td>${escapeForHtml(r.term)}</td><td>${escapeForHtml(r.translation)}</td></tr>`
+    )
+    .join("");
+  return `<table>${rows}</table>`;
+}
+
+function printNote() {
+  const note = notes[currentId];
+  ui.moreMenu.hidden = true;
+  if (!note) return;
+  const bodyHtml = note.glossary
+    ? glossaryToHtml(note.body)
+    : renderMarkdown(note.body);
+  const doc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeForHtml(
+    titleOf(note)
+  )}</title><style>
+    body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:42em;margin:2em auto;padding:0 1.5em;color:#111}
+    h1,h2,h3{line-height:1.25}h1{font-size:1.6em}
+    table{border-collapse:collapse;width:100%;margin:1em 0}
+    td,th{border:1px solid #ccc;padding:6px 10px;text-align:left;vertical-align:top}
+    td.gt{font-weight:600;background:#f3f3f3}
+    blockquote{border-left:3px solid #ccc;margin:1em 0;padding:.2em 1em;color:#555}
+    code{background:#f3f3f3;padding:1px 5px;border-radius:4px}
+    pre{background:#f3f3f3;padding:10px;border-radius:6px;overflow:auto}
+    a{color:#0645ad}.wikilink{color:#5b5ef4}
+    li.task{list-style:none}
+  </style></head><body><main>${bodyHtml}</main>
+  <script>window.onload=function(){setTimeout(function(){window.print()},80)}<\/script>
+  </body></html>`;
+  const url = URL.createObjectURL(new Blob([doc], { type: "text/html" }));
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 20000);
+}
+
+// ---- Quick capture (from the keyboard command) ----
+
+async function handleQuickCapture(ts) {
+  if (!ts || ts <= quickCaptureHandled) return;
+  quickCaptureHandled = ts;
+  await browser.storage.local.remove("quickCapture");
+  if (Date.now() - ts < 8000) await createNote();
+}
+
 // ---- Events ----
 
 ui.newNote.addEventListener("click", async (event) => {
@@ -888,8 +1197,16 @@ ui.editor.addEventListener("keydown", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (!ui.editorView.hidden) ui.back.click();
-  else if (!ui.settingsView.hidden) openList();
+  if (!ui.findBar.hidden) {
+    closeFind();
+    ui.editor.focus();
+  } else if (!ui.historyPanel.hidden) {
+    ui.historyPanel.hidden = true;
+  } else if (!ui.editorView.hidden) {
+    ui.back.click();
+  } else if (!ui.settingsView.hidden) {
+    openList();
+  }
 });
 
 ui.toolbar.addEventListener("click", (event) => {
@@ -924,14 +1241,66 @@ ui.pin.addEventListener("click", async () => {
   ui.pin.classList.toggle("pinned", note.pinned);
 });
 
-ui.copyNote.addEventListener("click", async () => {
+ui.menuCopy.addEventListener("click", async () => {
   await navigator.clipboard.writeText(ui.editor.value);
-  ui.copyNote.classList.add("ok");
-  setTimeout(() => ui.copyNote.classList.remove("ok"), 800);
+  ui.menuCopy.textContent = "Copied ✓";
+  ui.moreMenu.hidden = true;
+  setTimeout(() => (ui.menuCopy.textContent = "Copy note text"), 1000);
 });
+
+ui.menuPrint.addEventListener("click", printNote);
 
 ui.delete.addEventListener("click", handleDelete);
 ui.undoBtn.addEventListener("click", undoTrash);
+
+// Find in note.
+ui.findToggle.addEventListener("click", () => {
+  if (ui.findBar.hidden) openFind();
+  else closeFind();
+});
+ui.findInput.addEventListener("input", runFind);
+ui.findInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    gotoMatch(findIndex + (event.shiftKey ? -1 : 1));
+  }
+});
+ui.findPrev.addEventListener("click", () => gotoMatch(findIndex - 1));
+ui.findNext.addEventListener("click", () => gotoMatch(findIndex + 1));
+ui.findClose.addEventListener("click", () => {
+  closeFind();
+  ui.editor.focus();
+});
+ui.editor.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    openFind();
+  }
+});
+
+// Version history.
+ui.historyBtn.addEventListener("click", () => {
+  if (ui.historyPanel.hidden) openHistory();
+  else ui.historyPanel.hidden = true;
+});
+ui.historyClose.addEventListener("click", () => (ui.historyPanel.hidden = true));
+
+// Wiki-links and backlinks in the preview.
+ui.preview.addEventListener("click", (event) => {
+  const wl = event.target.closest(".wikilink");
+  if (wl) {
+    event.preventDefault();
+    openByTitle(wl.dataset.title);
+    return;
+  }
+  const bl = event.target.closest(".backlink");
+  if (bl) openEditor(bl.dataset.id);
+});
+
+// Keep the counter in sync with the current text selection.
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement === ui.editor) renderCounts();
+});
 
 // Toggling a checklist item in Preview writes the change back to the
 // Markdown source line it came from.
@@ -1013,8 +1382,28 @@ ui.importFile.addEventListener("change", () => {
   ui.importFile.value = "";
 });
 
+ui.importText.addEventListener("click", () => ui.importTextFile.click());
+ui.importTextFile.addEventListener("change", async () => {
+  const files = [...ui.importTextFile.files];
+  ui.importTextFile.value = "";
+  if (!files.length) return;
+  ui.importText.textContent = "Importing…";
+  const count = await importTextFiles(files);
+  notes = await loadNotes();
+  ui.importText.textContent = `Imported ${count} file${count > 1 ? "s" : ""}`;
+  setTimeout(() => (ui.importText.textContent = "Import .md / .txt files…"), 2500);
+});
+
 // Flush pending edits if the sidebar loses focus mid-typing.
 window.addEventListener("blur", flushSave);
+
+// The quick-capture command drops a timestamp the panel reacts to, whether
+// it was already open or just launched.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.quickCapture && changes.quickCapture.newValue) {
+    handleQuickCapture(changes.quickCapture.newValue);
+  }
+});
 
 onExternalChange(async () => {
   notes = await loadNotes();
@@ -1052,4 +1441,7 @@ onExternalChange(async () => {
   for (const note of Object.values(notes)) {
     if (note.deletedAt && note.deletedAt < cutoff) await purgeNote(note.id);
   }
+  // If the sidebar was just launched by the quick-capture command, act on it.
+  const { quickCapture } = await browser.storage.local.get("quickCapture");
+  if (quickCapture) await handleQuickCapture(quickCapture);
 })();

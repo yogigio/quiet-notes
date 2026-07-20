@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Quiet Notes",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Private, local-first notes in your sidebar. No servers, no accounts, no tracking.",
   "homepage_url": "https://example.com/replace-with-your-repo",
   "browser_specific_settings": {
@@ -35,6 +35,12 @@
         "default": "Ctrl+Alt+N"
       },
       "description": "Open the Quiet Notes sidebar"
+    },
+    "quick-capture": {
+      "suggested_key": {
+        "default": "Ctrl+Alt+Shift+N"
+      },
+      "description": "Open the sidebar and start a new note"
     }
   }
 }
