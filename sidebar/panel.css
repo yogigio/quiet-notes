@@ -204,12 +204,11 @@ svg {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: box-shadow 0.15s, translate 0.15s, border-color 0.15s;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
 #note-list li:hover {
   box-shadow: var(--shadow-lift);
-  translate: 0 -1px;
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
@@ -328,9 +327,12 @@ svg {
   border-left: 3px solid var(--fc, var(--accent));
   border-radius: var(--radius);
   cursor: pointer;
-  transition: box-shadow 0.15s, translate 0.15s;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
-.folder-row:hover { box-shadow: var(--shadow-lift); translate: 0 -1px; }
+.folder-row:hover {
+  box-shadow: var(--shadow-lift);
+  border-color: color-mix(in srgb, var(--fc, var(--accent)) 45%, var(--border));
+}
 
 .folder-emoji { font-size: 1.05rem; line-height: 1; flex: none; }
 .folder-name {
