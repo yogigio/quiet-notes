@@ -7,6 +7,8 @@ import {
   onExternalChange,
   loadSettings,
   saveSettings,
+  loadViewModes,
+  saveViewModes,
   loadHistory,
   pushHistory,
   newFolder,
@@ -73,6 +75,7 @@ const ui = {
   quotaText: $("quota-text"),
   oversizedList: $("oversized-list"),
   siteToggle: $("site-toggle"),
+  defaultView: $("default-view"),
   fontSize: $("font-size"),
   monoToggle: $("mono-toggle"),
   trashList: $("trash-list"),
@@ -109,6 +112,7 @@ let editingFolderId = null; // folder being edited in the sheet (null = new)
 let draftIcon = "📁";
 let draftColor = "blue";
 let settings = { syncEnabled: false };
+let viewModes = {}; // noteId -> "write" | "preview" (local-only)
 let currentId = null;
 let mode = "write";
 let saveTimer = null;
@@ -686,6 +690,25 @@ function openList() {
   renderList();
 }
 
+// Which mode a note opens in, per the "Open notes in" setting. Empty notes
+// always open in Write (nothing to preview).
+function initialModeFor(note) {
+  const pref = settings.defaultView || "remember";
+  if (pref === "write") return "write";
+  if (pref === "preview") return note.body.trim() ? "preview" : "write";
+  // "remember": last-used mode, else glossary-with-content opens in Preview.
+  if (viewModes[note.id]) return viewModes[note.id];
+  return note.glossary && note.body.trim() ? "preview" : "write";
+}
+
+// Record an explicit Write/Preview choice for the current note (local-only).
+function rememberMode(next) {
+  if (!currentId) return;
+  if (viewModes[currentId] === next) return;
+  viewModes[currentId] = next;
+  saveViewModes(viewModes);
+}
+
 async function openEditor(id) {
   currentId = id;
   const note = notes[id];
@@ -706,7 +729,7 @@ async function openEditor(id) {
   showView("editor");
   ui.saveState.textContent = "";
   renderCounts();
-  setMode(note.glossary && note.body.trim() ? "preview" : "write");
+  setMode(initialModeFor(note));
 }
 
 async function createNote(template) {
@@ -957,6 +980,10 @@ async function undoTrash() {
 
 async function purgeNote(id) {
   delete notes[id];
+  if (viewModes[id]) {
+    delete viewModes[id];
+    await saveViewModes(viewModes);
+  }
   await deleteNote(id);
 }
 
@@ -1047,6 +1074,7 @@ function renderTrash() {
 }
 
 function renderSettingsControls() {
+  ui.defaultView.value = settings.defaultView || "remember";
   ui.fontSize.value = settings.fontSize || "m";
   ui.monoToggle.checked = Boolean(settings.mono);
   ui.siteToggle.checked = sitePermission;
@@ -1697,8 +1725,14 @@ ui.back.addEventListener("click", async () => {
 });
 ui.settingsBack.addEventListener("click", openList);
 
-ui.modeWrite.addEventListener("click", () => setMode("write"));
-ui.modePreview.addEventListener("click", () => setMode("preview"));
+ui.modeWrite.addEventListener("click", () => {
+  setMode("write");
+  rememberMode("write");
+});
+ui.modePreview.addEventListener("click", () => {
+  setMode("preview");
+  rememberMode("preview");
+});
 
 ui.editor.addEventListener("input", () => {
   renderCounts();
@@ -1913,6 +1947,11 @@ ui.siteToggle.addEventListener("change", async () => {
   }
 });
 
+ui.defaultView.addEventListener("change", async () => {
+  settings.defaultView = ui.defaultView.value;
+  await saveSettings(settings);
+});
+
 ui.fontSize.addEventListener("change", async () => {
   settings.fontSize = ui.fontSize.value;
   applyEditorPrefs();
@@ -1991,11 +2030,21 @@ onExternalChange(async () => {
 // ---- Init ----
 
 (async function init() {
-  [notes, settings, folders] = await Promise.all([
+  [notes, settings, folders, viewModes] = await Promise.all([
     loadNotes(),
     loadSettings(),
     loadFolders(),
+    loadViewModes(),
   ]);
+  // Drop remembered view modes for notes that no longer exist.
+  let prunedViewModes = false;
+  for (const id of Object.keys(viewModes)) {
+    if (!notes[id]) {
+      delete viewModes[id];
+      prunedViewModes = true;
+    }
+  }
+  if (prunedViewModes) saveViewModes(viewModes);
   buildFolderControls();
   try {
     sitePermission = await browser.permissions.contains({ permissions: ["tabs"] });

@@ -261,6 +261,20 @@ general editor behavior that helps every note:
   unchecked); Enter on an empty item removes the marker and ends the
   list. Disabled in glossary notes. Still plain Markdown underneath.
 
+### v0.9.2 — default view mode (shipped)
+
+- A note reopens in the mode you last left it (Write/Preview). New/empty
+  notes always open in Write; glossary-with-content opens in Preview when
+  there's no remembered mode.
+- The last-used mode is stored in a local-only `viewModes` map (noteId →
+  mode), deliberately **not** on the note record — so switching views
+  never bumps `updatedAt` (no list reorder) and never triggers a sync
+  write. Only explicit Write/Preview clicks are recorded; transient
+  switches (e.g. find forcing Write) are not. Stale entries are pruned on
+  purge and at startup.
+- Settings → Appearance → **"Open notes in"**: `Last used` (default),
+  `Write`, or `Preview`.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

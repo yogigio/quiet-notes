@@ -28,7 +28,8 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
   also work in the editor)
 - **Trash with undo**: deleted notes are recoverable for 30 days
 - **Templates**: mark any note as a template, create new notes from it
-- Adjustable note text size and a monospace option
+- Adjustable note text size, monospace option, and a default view mode
+  (a note reopens how you left it — Write or Preview)
 - **Folders**: organize notes into color- and emoji-tagged folders you
   navigate into (like Claude/ChatGPT projects); tags stay cross-cutting
 - **Site notes** (optional): link a note to the site you're on and it

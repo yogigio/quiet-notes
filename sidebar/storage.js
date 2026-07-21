@@ -58,6 +58,17 @@ export async function deleteFolder(id) {
   await browser.storage.local.remove(FOLDER_PREFIX + id);
 }
 
+// Per-note last-used view mode ("write"/"preview"). Local-only and kept out
+// of the note record so toggling a view never bumps updatedAt or syncs.
+export async function loadViewModes() {
+  const { viewModes } = await browser.storage.local.get("viewModes");
+  return viewModes || {};
+}
+
+export async function saveViewModes(viewModes) {
+  await browser.storage.local.set({ viewModes });
+}
+
 export async function loadSettings() {
   const { settings } = await browser.storage.local.get("settings");
   return settings || { syncEnabled: false };
