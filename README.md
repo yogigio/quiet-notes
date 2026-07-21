@@ -88,5 +88,6 @@ docs/DESIGN.md       Architecture, sync protocol, feature roadmap
 ## Before publishing
 
 - Replace the placeholder add-on id `quiet-notes@giorgi.notes` in
-  `manifest.json` with an id you control, and `homepage_url` with your repo URL.
+  `manifest.json` with an id you control. (`homepage_url` now points at the
+  repo.)
 - Run `web-ext lint`.
