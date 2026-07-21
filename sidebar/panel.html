@@ -230,6 +230,18 @@
         </label>
       </section>
       <section class="setting">
+        <strong>Time tracking</strong>
+        <div class="row">
+          <label for="timer-mode">When you start a timer on another note</label>
+          <select id="timer-mode">
+            <option value="per-note" selected>Pause the current one</option>
+            <option value="single">Save the current one</option>
+            <option value="concurrent">Keep both running</option>
+          </select>
+        </div>
+        <p class="hint" id="timer-mode-hint"></p>
+      </section>
+      <section class="setting">
         <strong>Trash</strong>
         <p class="hint">Deleted notes are kept for 30 days, then removed.</p>
         <div id="trash-list"></div>

@@ -35,8 +35,10 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Time tracking**: a per-note stopwatch (start / pause / save / reset)
   that keeps counting in the background — close the sidebar and it resumes.
   Saved sessions roll up into a per-note total (with words/hour) and a
-  per-folder *project* total. Local-only, but included in export/import for
-  your billing records. No new permissions
+  per-folder *project* total. Each note has its own timer; a setting chooses
+  what starting one does to another that's running (pause it — the default —,
+  save it, or keep both running). Local-only, but included in export/import
+  for your billing records. No new permissions
 - **Site notes** (optional): link a note to the site you're on and it
   surfaces on top of the list when you return. Off by default — enabling
   it requests the `tabs` permission at runtime (hostname only, revoked

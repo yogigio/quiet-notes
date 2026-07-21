@@ -14,10 +14,11 @@ const HISTORY_LIMIT = 50;
 // history, they stay out of the "note:" namespace so the sync engine never
 // mirrors them — time logs are local-only and free of the sync quota — but
 // they ARE included in JSON export/import, since billable hours are data the
-// user must be able to back up. The single "timer" key holds the one active
-// (running or paused) timer so it survives the sidebar closing.
+// user must be able to back up. The "timers" key holds the map of active
+// (running or paused) timers keyed by note id, so they survive the sidebar
+// closing. (v0.10 used a single "timer" object; loadTimers migrates it.)
 const TIME_PREFIX = "time:";
-const TIMER_KEY = "timer";
+const TIMERS_KEY = "timers";
 
 export function newNote() {
   const now = Date.now();
@@ -135,18 +136,34 @@ export async function loadAllTimeEntries() {
   return out;
 }
 
-// The one active timer, or null. Shape:
-//   { noteId, accumulatedMs, runningSince }
-// runningSince is a Date.now() timestamp while running, or null while paused;
-// elapsed = accumulatedMs + (runningSince ? Date.now() - runningSince : 0).
-export async function loadActiveTimer() {
-  const got = await browser.storage.local.get(TIMER_KEY);
-  return got[TIMER_KEY] || null;
+// The active timers, as { noteId: { accumulatedMs, runningSince } }. Each
+// timer's runningSince is a Date.now() timestamp while running, or null while
+// paused; elapsed = accumulatedMs + (runningSince ? Date.now() - runningSince
+// : 0). Depending on the chosen mode there may be one or several entries.
+export async function loadTimers() {
+  const got = await browser.storage.local.get([TIMERS_KEY, "timer"]);
+  const map = got[TIMERS_KEY] && typeof got[TIMERS_KEY] === "object" ? got[TIMERS_KEY] : {};
+  // Migrate the v0.10 single-timer key into the map, once.
+  const legacy = got.timer;
+  if (legacy && legacy.noteId) {
+    if (!map[legacy.noteId]) {
+      map[legacy.noteId] = {
+        accumulatedMs: legacy.accumulatedMs || 0,
+        runningSince: legacy.runningSince || null,
+      };
+    }
+    await browser.storage.local.remove("timer");
+    await browser.storage.local.set({ [TIMERS_KEY]: map });
+  }
+  return map;
 }
 
-export async function saveActiveTimer(timer) {
-  if (timer) await browser.storage.local.set({ [TIMER_KEY]: timer });
-  else await browser.storage.local.remove(TIMER_KEY);
+export async function saveTimers(timers) {
+  if (timers && Object.keys(timers).length) {
+    await browser.storage.local.set({ [TIMERS_KEY]: timers });
+  } else {
+    await browser.storage.local.remove(TIMERS_KEY);
+  }
 }
 
 // ---- Version history (local-only) ----

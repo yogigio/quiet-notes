@@ -307,6 +307,29 @@ where the work happens.
   sessions and any running timer. **No new permissions** — pure
   `storage.local`, so the zero-collection/no-install-warning story is intact.
 
+### v0.10.1 — per-note timers + mode setting (shipped)
+
+Generalizes v0.10's single global timer into a **timer per note**, kept in a
+`timers` map (`{ noteId: { accumulatedMs, runningSince } }`) under the
+`timers` key; the old single `timer` object is migrated in on first load.
+Elapsed is still purely timestamp-derived, so the background/resume behavior
+is unchanged.
+
+- **Settings → Time tracking → "When you start a timer on another note":**
+  - **Pause the current one** (`per-note`, default) — each note keeps its own
+    timer; starting one parks (pauses, retains) whatever was running, so only
+    one runs at a time and a work session isn't fragmented into many entries.
+  - **Save the current one** (`single`) — the original v0.10 behavior: only
+    ever one timer, and switching auto-commits the previous session.
+  - **Keep both running** (`concurrent`) — timers on different notes all run
+    at once. The hint spells out that overlapping timers double-count real
+    time, since that matters for billing.
+- The mode only changes what happens to *other* timers when you start one
+  (park / commit / leave). The footer chip shows the current note's timer, or
+  summarizes timers on other notes (`N×`); the panel lists other active timers
+  with jump links. Folder (project) totals fold in every live timer. No new
+  permissions — still pure `storage.local`.
+
 ### v0.11 — countdown & reminders (planned)
 
 - A countdown/Pomodoro mode on the same widget, with a "time's up"

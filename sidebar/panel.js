@@ -18,8 +18,8 @@ import {
   loadTimeEntries,
   saveTimeEntries,
   loadAllTimeEntries,
-  loadActiveTimer,
-  saveActiveTimer,
+  loadTimers,
+  saveTimers,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -98,6 +98,8 @@ const ui = {
   defaultView: $("default-view"),
   fontSize: $("font-size"),
   monoToggle: $("mono-toggle"),
+  timerMode: $("timer-mode"),
+  timerModeHint: $("timer-mode-hint"),
   trashList: $("trash-list"),
   emptyTrash: $("empty-trash"),
   undoToast: $("undo-toast"),
@@ -147,11 +149,12 @@ let lastSnapshotAt = 0;
 let findMatches = [];
 let findIndex = -1;
 let quickCaptureHandled = 0;
-// Time tracking. `activeTimer` is the single global timer (or null); it lives
-// in storage.local so it keeps counting while the sidebar is closed. `timeEntries`
-// is the open note's saved sessions; `folderTimeMs` caches per-folder totals for
-// the list. `tickHandle` is the 1s interval that repaints live displays.
-let activeTimer = null;
+// Time tracking. `timers` maps noteId -> { accumulatedMs, runningSince }; it
+// lives in storage.local so timers keep counting while the sidebar is closed.
+// How many may run at once depends on settings.timerMode (per-note / single /
+// concurrent). `timeEntries` is the open note's saved sessions; `folderTimeMs`
+// caches per-folder totals for the list. `tickHandle` is the 1s repaint interval.
+let timers = {};
 let timeEntries = [];
 let folderTimeMs = {};
 let tickHandle = null;
@@ -1030,10 +1033,10 @@ async function purgeNote(id) {
     delete viewModes[id];
     await saveViewModes(viewModes);
   }
-  // Drop a running timer tied to the note being permanently removed.
-  if (activeTimer && activeTimer.noteId === id) {
-    activeTimer = null;
-    await saveActiveTimer(null);
+  // Drop any timer tied to the note being permanently removed.
+  if (timers[id]) {
+    delete timers[id];
+    await saveTimers(timers);
     ensureTick();
     renderTimerChip();
   }
@@ -1127,10 +1130,24 @@ function renderTrash() {
   }
 }
 
+// One line describing what the chosen timer mode does, incl. the caveat on
+// concurrent tracking (it double-counts real time, which matters for billing).
+const TIMER_MODE_HINTS = {
+  "per-note": "Each note keeps its own timer. Starting one pauses whatever was running, so only one runs at a time and hours never double-count. Recommended.",
+  single: "Only ever one timer: starting a new note's timer saves the previous one as a session.",
+  concurrent: "Timers on different notes all keep running at once. Flexible, but overlapping timers double-count your actual time — take care if you bill from this.",
+};
+
+function renderTimerModeHint() {
+  ui.timerModeHint.textContent = TIMER_MODE_HINTS[timerMode()] || "";
+}
+
 function renderSettingsControls() {
   ui.defaultView.value = settings.defaultView || "remember";
   ui.fontSize.value = settings.fontSize || "m";
   ui.monoToggle.checked = Boolean(settings.mono);
+  ui.timerMode.value = timerMode();
+  renderTimerModeHint();
   ui.siteToggle.checked = sitePermission;
 }
 
@@ -1630,9 +1647,12 @@ function timerElapsed(timer) {
   return timer.accumulatedMs + live;
 }
 
-function timerRunning() {
-  return Boolean(activeTimer && activeTimer.runningSince);
-}
+const isRunning = (timer) => Boolean(timer && timer.runningSince);
+const timerFor = (id) => timers[id] || null;
+const anyRunning = () => Object.values(timers).some(isRunning);
+// Active timers on notes other than the given one, [ [id, timer], … ].
+const otherTimers = (id) => Object.entries(timers).filter(([nid]) => nid !== id);
+const timerMode = () => settings.timerMode || "per-note";
 
 // H:MM:SS for the live clock.
 function formatClock(ms) {
@@ -1659,18 +1679,21 @@ function entriesTotalMs(entries) {
   return entries.reduce((sum, e) => sum + (e.ms || 0), 0);
 }
 
-// Total tracked time for a note = saved sessions + any live active timer on it.
+// Total tracked time for a note = saved sessions + its live timer, if any.
 function noteTotalMs(id, entries) {
-  let ms = entriesTotalMs(entries || []);
-  if (activeTimer && activeTimer.noteId === id) ms += timerElapsed(activeTimer);
-  return ms;
+  return entriesTotalMs(entries || []) + timerElapsed(timerFor(id));
 }
 
-// Keep exactly one ticking interval alive while a timer is running.
+function titleFor(id) {
+  const note = notes[id];
+  return note ? titleOf(note) : "a note";
+}
+
+// Keep exactly one ticking interval alive while any timer is running.
 function ensureTick() {
-  if (timerRunning() && !tickHandle) {
+  if (anyRunning() && !tickHandle) {
     tickHandle = setInterval(paintTimer, 1000);
-  } else if (!timerRunning() && tickHandle) {
+  } else if (!anyRunning() && tickHandle) {
     clearInterval(tickHandle);
     tickHandle = null;
   }
@@ -1679,95 +1702,111 @@ function ensureTick() {
 // Repaint only the live numbers (cheap; runs every second). Full control
 // state is repainted by renderTimer on state changes.
 function paintTimer() {
-  const elapsed = timerElapsed(activeTimer);
-  if (activeTimer && activeTimer.noteId === currentId && !ui.timerPanel.hidden) {
-    ui.timerDisplay.textContent = formatClock(elapsed);
+  const cur = timerFor(currentId);
+  if (cur && !ui.timerPanel.hidden) {
+    ui.timerDisplay.textContent = formatClock(timerElapsed(cur));
   }
   renderTimerChip();
 }
 
-// The always-visible footer chip: shows the live time whenever a timer is
-// active, so tracking is never silently running. A pulsing dot means running.
+// The always-visible footer chip. Shows the current note's timer when it has
+// one; otherwise summarizes timers running on other notes. A pulsing dot means
+// running. Never lets tracking run invisibly.
 function renderTimerChip() {
-  if (!activeTimer) {
+  const cur = timerFor(currentId);
+  const others = currentId ? otherTimers(currentId) : Object.entries(timers);
+  if (!cur && !others.length) {
     ui.timerChip.hidden = true;
+    ui.timerBtn.classList.remove("active");
     return;
   }
   ui.timerChip.hidden = false;
-  ui.timerChip.classList.toggle("running", timerRunning());
-  ui.timerChip.classList.toggle("other", activeTimer.noteId !== currentId);
-  ui.timerChipTime.textContent = formatClock(timerElapsed(activeTimer));
-  const onThis = activeTimer.noteId === currentId;
-  ui.timerChip.title = onThis
-    ? timerRunning()
+  if (cur) {
+    ui.timerChip.classList.toggle("running", isRunning(cur));
+    ui.timerChip.classList.remove("other");
+    ui.timerChipTime.textContent = formatClock(timerElapsed(cur));
+    ui.timerChip.title = isRunning(cur)
       ? "Timer running — open time tracker"
-      : "Timer paused — open time tracker"
-    : `Timer ${timerRunning() ? "running" : "paused"} on "${otherTimerTitle()}" — open`;
-  // The stopwatch button in the bar also lights up when tracking this note.
-  ui.timerBtn.classList.toggle("active", onThis);
+      : "Timer paused — open time tracker";
+  } else if (others.length === 1) {
+    const [oid, t] = others[0];
+    ui.timerChip.classList.toggle("running", isRunning(t));
+    ui.timerChip.classList.add("other");
+    ui.timerChipTime.textContent = formatClock(timerElapsed(t));
+    ui.timerChip.title = `Timer ${isRunning(t) ? "running" : "paused"} on "${titleFor(oid)}" — go to it`;
+  } else {
+    const runningCount = others.filter(([, t]) => isRunning(t)).length;
+    ui.timerChip.classList.toggle("running", runningCount > 0);
+    ui.timerChip.classList.add("other");
+    ui.timerChipTime.textContent = `${others.length}×`;
+    ui.timerChip.title = `${others.length} timers on other notes (${runningCount} running) — open tracker`;
+  }
+  ui.timerBtn.classList.toggle("active", Boolean(cur));
 }
 
-function otherTimerTitle() {
-  const note = activeTimer && notes[activeTimer.noteId];
-  return note ? titleOf(note) : "another note";
-}
-
-async function persistTimer() {
-  await saveActiveTimer(activeTimer);
+async function persistTimers() {
+  await saveTimers(timers);
+  await refreshFolderTimes();
   ensureTick();
-  renderTimerChip();
 }
 
-// Start (or resume) tracking the open note. If a timer is already running on a
-// different note, commit that one first — the standard single-timer behavior.
-async function startTimer() {
-  if (!currentId) return;
-  if (activeTimer && activeTimer.noteId !== currentId) {
-    await commitTimer(); // saves the other note's session, clears activeTimer
-  }
-  if (!activeTimer) {
-    activeTimer = { noteId: currentId, accumulatedMs: 0, runningSince: Date.now() };
-  } else if (!activeTimer.runningSince) {
-    activeTimer.runningSince = Date.now(); // resume from pause
-  }
-  await persistTimer();
-  renderTimer();
+// Pause (park) a note's timer in place, keeping its accumulated time.
+function parkTimer(id) {
+  const t = timers[id];
+  if (!t || !t.runningSince) return;
+  t.accumulatedMs = timerElapsed(t);
+  t.runningSince = null;
 }
 
-async function pauseTimer() {
-  if (!timerRunning()) return;
-  activeTimer.accumulatedMs = timerElapsed(activeTimer);
-  activeTimer.runningSince = null;
-  await persistTimer();
-  renderTimer();
-}
-
-// Commit the active timer's elapsed time as a saved session on its note, then
-// clear it. Returns the note id it was saved to (or null). Sessions under one
-// minute are dropped as accidental taps rather than logged.
-async function commitTimer() {
-  if (!activeTimer) return null;
-  const id = activeTimer.noteId;
-  const ms = timerElapsed(activeTimer);
-  activeTimer = null;
-  await saveActiveTimer(null);
+// Commit a note's timer as a saved session, then remove it from the map.
+// Sessions under a minute are dropped as accidental taps. Returns elapsed ms.
+async function commitTimer(id) {
+  const t = timers[id];
+  if (!t) return 0;
+  const ms = timerElapsed(t);
+  delete timers[id];
   if (ms >= 60000) {
     const entries = id === currentId ? timeEntries : await loadTimeEntries(id);
     entries.push({ start: Date.now() - ms, end: Date.now(), ms });
     await saveTimeEntries(id, entries);
     if (id === currentId) timeEntries = entries;
   }
-  await refreshFolderTimes();
-  ensureTick();
-  return id;
+  return ms;
+}
+
+// Start (or resume) tracking the open note. What happens to timers already
+// running on OTHER notes depends on the mode:
+//   • per-note  — park them (kept, paused), so only one runs at a time
+//   • single    — commit them (auto-save), so there is ever only one timer
+//   • concurrent— leave them running
+async function startTimer() {
+  if (!currentId) return;
+  const mode = timerMode();
+  if (mode === "single") {
+    for (const [id] of otherTimers(currentId)) await commitTimer(id);
+  } else if (mode === "per-note") {
+    for (const [id, t] of otherTimers(currentId)) if (t.runningSince) parkTimer(id);
+  }
+  const cur = timers[currentId];
+  if (!cur) timers[currentId] = { accumulatedMs: 0, runningSince: Date.now() };
+  else if (!cur.runningSince) cur.runningSince = Date.now(); // resume from pause
+  await persistTimers();
+  renderTimer();
+}
+
+async function pauseTimer() {
+  const cur = timers[currentId];
+  if (!isRunning(cur)) return;
+  parkTimer(currentId);
+  await persistTimers();
+  renderTimer();
 }
 
 async function saveTimerSession() {
-  if (!activeTimer || activeTimer.noteId !== currentId) return;
-  const ms = timerElapsed(activeTimer);
-  await commitTimer();
+  if (!timers[currentId]) return;
+  const ms = await commitTimer(currentId);
+  await persistTimers();
   renderTimer();
-  renderTimerChip();
   if (ms < 60000) {
     // Too short to log; tell the user rather than silently dropping it.
     ui.timerState.textContent = "Under a minute — not logged.";
@@ -1775,7 +1814,7 @@ async function saveTimerSession() {
 }
 
 async function resetTimer() {
-  if (!activeTimer || activeTimer.noteId !== currentId) return;
+  if (!timers[currentId]) return;
   if (!resetArmed) {
     resetArmed = true;
     ui.timerReset.textContent = "Discard?";
@@ -1786,11 +1825,9 @@ async function resetTimer() {
     return;
   }
   resetArmed = false;
-  activeTimer = null;
-  await saveActiveTimer(null);
-  ensureTick();
+  delete timers[currentId];
+  await persistTimers();
   renderTimer();
-  renderTimerChip();
 }
 
 function openTimer() {
@@ -1803,38 +1840,41 @@ function openTimer() {
 function renderTimer() {
   resetArmed = false;
   ui.timerReset.textContent = "Reset";
-  const onThis = activeTimer && activeTimer.noteId === currentId;
-  const elsewhere = activeTimer && activeTimer.noteId !== currentId;
+  const cur = timerFor(currentId);
+  const others = currentId ? otherTimers(currentId) : [];
 
-  // Banner when a timer is running on another note.
-  ui.timerElsewhere.hidden = !elsewhere;
-  if (elsewhere) {
+  // Banner listing timers active on other notes, each with a jump link.
+  ui.timerElsewhere.hidden = others.length === 0;
+  if (others.length) {
     ui.timerElsewhere.textContent = "";
     const label = document.createElement("span");
-    label.textContent = `${timerRunning() ? "Running" : "Paused"} on "${otherTimerTitle()}"`;
-    const go = document.createElement("button");
-    go.className = "link-btn";
-    go.textContent = "Go to it";
-    go.addEventListener("click", () => openEditor(activeTimer.noteId));
-    ui.timerElsewhere.append(label, go);
+    label.textContent =
+      others.length === 1
+        ? `${isRunning(others[0][1]) ? "Running" : "Paused"} on "${titleFor(others[0][0])}"`
+        : `${others.length} timers on other notes`;
+    ui.timerElsewhere.append(label);
+    // One jump link per other note (capped so the banner stays compact).
+    others.slice(0, 3).forEach(([oid, t]) => {
+      const go = document.createElement("button");
+      go.className = "link-btn";
+      go.textContent = others.length === 1 ? "Go to it" : `${titleFor(oid)} · ${formatClock(timerElapsed(t))}`;
+      go.addEventListener("click", () => openEditor(oid));
+      ui.timerElsewhere.append(go);
+    });
   }
 
-  ui.timerDisplay.textContent = formatClock(onThis ? timerElapsed(activeTimer) : 0);
-  ui.timerDisplay.classList.toggle("live", Boolean(onThis && timerRunning()));
+  ui.timerDisplay.textContent = formatClock(timerElapsed(cur));
+  ui.timerDisplay.classList.toggle("live", isRunning(cur));
 
-  // Controls reflect the timer's state for THIS note.
-  const running = onThis && timerRunning();
-  const paused = onThis && !timerRunning();
-  ui.timerStart.hidden = onThis && running;
+  // Controls reflect this note's timer state.
+  const running = isRunning(cur);
+  const paused = cur && !running;
+  ui.timerStart.hidden = running;
   ui.timerStart.textContent = paused ? "Resume" : "Start";
   ui.timerPause.hidden = !running;
-  ui.timerSave.hidden = !onThis;
-  ui.timerReset.hidden = !onThis;
-  ui.timerState.textContent = running
-    ? "Tracking…"
-    : paused
-      ? "Paused"
-      : "";
+  ui.timerSave.hidden = !cur;
+  ui.timerReset.hidden = !cur;
+  ui.timerState.textContent = running ? "Tracking…" : paused ? "Paused" : "";
 
   renderTimerTotals();
   renderTimerEntries();
@@ -1932,12 +1972,12 @@ async function refreshFolderTimes() {
     folderTimeMs[note.folderId] =
       (folderTimeMs[note.folderId] || 0) + entriesTotalMs(entries);
   }
-  // Fold in the live active timer so folder totals tick up in real time.
-  if (activeTimer) {
-    const note = notes[activeTimer.noteId];
+  // Fold in every live timer so folder totals tick up in real time.
+  for (const [noteId, t] of Object.entries(timers)) {
+    const note = notes[noteId];
     if (note && note.folderId && !note.deletedAt) {
       folderTimeMs[note.folderId] =
-        (folderTimeMs[note.folderId] || 0) + timerElapsed(activeTimer);
+        (folderTimeMs[note.folderId] || 0) + timerElapsed(t);
     }
   }
 }
@@ -2294,8 +2334,10 @@ ui.timerBtn.addEventListener("click", () => {
 });
 ui.timerClose.addEventListener("click", () => (ui.timerPanel.hidden = true));
 ui.timerChip.addEventListener("click", () => {
-  // Chip may reflect a timer on another note; jump there, else open the panel.
-  if (activeTimer && activeTimer.noteId !== currentId) openEditor(activeTimer.noteId);
+  // If the chip reflects a single timer on another note, jump to it; otherwise
+  // (current note's timer, or several elsewhere) open the panel.
+  const others = currentId ? otherTimers(currentId) : Object.entries(timers);
+  if (!timerFor(currentId) && others.length === 1) openEditor(others[0][0]);
   else openTimer();
 });
 ui.timerStart.addEventListener("click", startTimer);
@@ -2384,6 +2426,12 @@ ui.monoToggle.addEventListener("change", async () => {
   await saveSettings(settings);
 });
 
+ui.timerMode.addEventListener("change", async () => {
+  settings.timerMode = ui.timerMode.value;
+  renderTimerModeHint();
+  await saveSettings(settings);
+});
+
 ui.emptyTrash.addEventListener("click", async () => {
   for (const note of trashedNotes()) await purgeNote(note.id);
   renderTrash();
@@ -2428,15 +2476,17 @@ browser.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Keep the timer coherent if another sidebar window starts/stops one, or if a
+// Keep timers coherent if another sidebar window starts/stops one, or if a
 // note's sessions change elsewhere.
 browser.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
-  if ("timer" in changes) {
-    activeTimer = changes.timer.newValue || null;
+  if ("timers" in changes) {
+    timers = changes.timers.newValue || {};
+    await refreshFolderTimes();
     ensureTick();
     if (!ui.timerPanel.hidden) renderTimer();
     else renderTimerChip();
+    if (!ui.listView.hidden) renderList();
   }
   if (currentId && `time:${currentId}` in changes) {
     timeEntries = changes[`time:${currentId}`].newValue || [];
@@ -2490,13 +2540,18 @@ onExternalChange(async () => {
   if (sitePermission) startSiteTracking();
   renderStorageBadge();
   applyEditorPrefs();
-  // Resume any timer that was left running when the sidebar last closed, and
-  // seed folder (project) totals.
-  activeTimer = await loadActiveTimer();
-  if (activeTimer && !notes[activeTimer.noteId]) {
-    activeTimer = null; // its note was deleted while the sidebar was closed
-    await saveActiveTimer(null);
+  // Resume any timers left running when the sidebar last closed (migrating the
+  // v0.10 single-timer key), dropping any whose note is gone, and seed folder
+  // (project) totals.
+  timers = await loadTimers();
+  let prunedTimers = false;
+  for (const id of Object.keys(timers)) {
+    if (!notes[id]) {
+      delete timers[id];
+      prunedTimers = true;
+    }
   }
+  if (prunedTimers) await saveTimers(timers);
   await refreshFolderTimes();
   ensureTick();
   renderTimerChip();
