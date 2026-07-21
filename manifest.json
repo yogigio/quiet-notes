@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Quiet Notes",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Private, local-first notes in your sidebar. No servers, no accounts, no tracking.",
   "homepage_url": "https://github.com/yogigio/quiet-notes",
   "browser_specific_settings": {
@@ -10,7 +10,7 @@
       "strict_min_version": "115.0"
     }
   },
-  "permissions": ["storage", "menus"],
+  "permissions": ["storage", "menus", "alarms", "notifications"],
   "optional_permissions": ["tabs"],
   "icons": {
     "48": "icons/note.svg",

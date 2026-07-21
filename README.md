@@ -38,7 +38,13 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
   per-folder *project* total. Each note has its own timer; a setting chooses
   what starting one does to another that's running (pause it — the default —,
   save it, or keep both running). Local-only, but included in export/import
-  for your billing records. No new permissions
+  for your billing records
+- **Countdown & Pomodoro**: the timer has a Countdown tab with presets and a
+  Pomodoro mode (25/5, auto-cycling) that notifies you when time's up — even
+  if the sidebar is closed
+- **Reminders**: give any note a due date (⋯ → Set reminder…); a desktop
+  notification fires at the set time and clicking it opens the note. Reminders
+  stay on this device and never sync
 - **Site notes** (optional): link a note to the site you're on and it
   surfaces on top of the list when you return. Off by default — enabling
   it requests the `tabs` permission at runtime (hostname only, revoked
@@ -53,9 +59,10 @@ browser-level setting extensions cannot (and should not) change.
 ## Principles
 
 1. **Local-first.** `browser.storage.local` is the single source of truth.
-2. **Zero collection.** The extension makes no network requests. Its only
-   permissions are `storage` and `menus` (the right-click item) — neither
-   grants access to page content or triggers an install warning.
+2. **Zero collection.** The extension makes no network requests. Its
+   permissions are `storage`, `menus` (the right-click item), and
+   `alarms` + `notifications` (for the countdown and reminders) — none of
+   which grants access to page content or triggers an install warning.
 3. **Your data, portable.** One-click export/import to plain JSON. No lock-in.
 4. **Readable code.** No build step, no framework, no minification — what you
    see in this repo is exactly what runs in the browser.

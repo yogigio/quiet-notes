@@ -57,6 +57,7 @@
       <div id="more-menu" class="menu" hidden>
         <button id="menu-copy">Copy note text</button>
         <button id="menu-folder">Move to folder…</button>
+        <button id="menu-reminder">Set reminder…</button>
         <button id="menu-duplicate">Duplicate note</button>
         <button id="menu-print">Print note…</button>
         <button id="menu-template">Use as template</button>
@@ -149,18 +150,47 @@
         <button id="timer-close" class="icon-btn" title="Close" aria-label="Close time tracker">×</button>
       </div>
       <div id="timer-body">
-        <div id="timer-elsewhere" class="timer-notice" hidden></div>
-        <div id="timer-display" aria-live="off">0:00:00</div>
-        <div id="timer-state" class="hint"></div>
-        <div id="timer-controls">
-          <button id="timer-start" class="primary-btn">Start</button>
-          <button id="timer-pause" hidden>Pause</button>
-          <button id="timer-save" hidden>Save</button>
-          <button id="timer-reset" class="ghost-btn" hidden>Reset</button>
+        <div id="timer-tabs" role="group" aria-label="Timer type">
+          <button id="tab-stopwatch" class="seg active">Stopwatch</button>
+          <button id="tab-countdown" class="seg">Countdown</button>
         </div>
-        <div id="timer-totals"></div>
-        <div class="field-label" id="timer-log-label" hidden>Sessions</div>
-        <div id="timer-entries"></div>
+
+        <div id="timer-stopwatch">
+          <div id="timer-elsewhere" class="timer-notice" hidden></div>
+          <div id="timer-display" aria-live="off">0:00:00</div>
+          <div id="timer-state" class="hint"></div>
+          <div id="timer-controls">
+            <button id="timer-start" class="primary-btn">Start</button>
+            <button id="timer-pause" hidden>Pause</button>
+            <button id="timer-save" hidden>Save</button>
+            <button id="timer-reset" class="ghost-btn" hidden>Reset</button>
+          </div>
+          <div id="timer-totals"></div>
+          <div class="field-label" id="timer-log-label" hidden>Sessions</div>
+          <div id="timer-entries"></div>
+        </div>
+
+        <div id="timer-countdown" hidden>
+          <div id="cd-phase" class="cd-phase" hidden></div>
+          <div id="cd-display">25:00</div>
+          <div id="cd-state" class="hint"></div>
+          <div id="cd-presets">
+            <button type="button" data-min="5">5m</button>
+            <button type="button" data-min="15">15m</button>
+            <button type="button" data-min="25">25m</button>
+            <button type="button" data-min="45">45m</button>
+          </div>
+          <label class="check-row slim" id="cd-pomodoro-row">
+            <input type="checkbox" id="cd-pomodoro">
+            <span>Pomodoro — 25 min focus / 5 min break, auto-cycling</span>
+          </label>
+          <div id="cd-controls">
+            <button id="cd-start" class="primary-btn">Start</button>
+            <button id="cd-pause" hidden>Pause</button>
+            <button id="cd-reset" class="ghost-btn" hidden>Reset</button>
+          </div>
+          <div id="cd-cycles" class="hint"></div>
+        </div>
       </div>
     </div>
   </main>
@@ -277,6 +307,28 @@
         <span class="spacer"></span>
         <button id="folder-cancel">Cancel</button>
         <button id="folder-save" class="primary-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="reminder-sheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <strong class="sheet-title">Set reminder</strong>
+      <p class="hint" id="reminder-for"></p>
+      <input id="reminder-at" type="datetime-local" autocomplete="off">
+      <div id="reminder-quick" class="reminder-quick">
+        <button type="button" data-mins="60">In 1 hour</button>
+        <button type="button" data-mins="180">In 3 hours</button>
+        <button type="button" data-mins="1440">Tomorrow</button>
+        <button type="button" data-mins="10080">Next week</button>
+      </div>
+      <p class="hint">Fires a desktop notification even if the sidebar is
+        closed. Reminders stay on this device and never sync.</p>
+      <div class="sheet-actions">
+        <button id="reminder-clear" class="danger-btn" hidden>Clear</button>
+        <span class="spacer"></span>
+        <button id="reminder-cancel">Cancel</button>
+        <button id="reminder-save" class="primary-btn">Save</button>
       </div>
     </div>
   </div>

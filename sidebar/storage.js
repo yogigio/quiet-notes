@@ -166,6 +166,35 @@ export async function saveTimers(timers) {
   }
 }
 
+// ---- Countdown / Pomodoro (single, local-only) ----
+// The background script schedules the alarm/notification from this state.
+export async function loadCountdown() {
+  const { countdown } = await browser.storage.local.get("countdown");
+  return countdown || null;
+}
+
+export async function saveCountdown(countdown) {
+  if (countdown) await browser.storage.local.set({ countdown });
+  else await browser.storage.local.remove("countdown");
+}
+
+// ---- Reminders (per-note due dates, local-only but exported) ----
+// A { noteId: { at } } map under the single "reminders" key. Local-only so it
+// never bumps note.updatedAt or syncs (which would risk double-firing across
+// devices); included in JSON export for backup. The background fires them.
+export async function loadReminders() {
+  const { reminders } = await browser.storage.local.get("reminders");
+  return reminders || {};
+}
+
+export async function saveReminders(reminders) {
+  if (reminders && Object.keys(reminders).length) {
+    await browser.storage.local.set({ reminders });
+  } else {
+    await browser.storage.local.remove("reminders");
+  }
+}
+
 // ---- Version history (local-only) ----
 
 export async function loadHistory(id) {

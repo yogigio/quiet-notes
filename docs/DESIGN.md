@@ -19,7 +19,9 @@ end-to-end encryption — no third-party or first-party servers, ever.
   small, make `storage.onChanged` events precise, and map 1:1 onto sync
   mirroring. Sibling namespaces that are intentionally **not** synced (the
   mirror only copies `note:`/`folder:` keys): `history:<id>` (version
-  snapshots), `settings`, `oversized`, `quickCapture`.
+  snapshots), `time:<id>` (tracked sessions), `timers`/`countdown` (active
+  timers), `reminders`, `viewModes`, `settings`, `oversized`, `quickCapture`,
+  `openNote`.
 - **No build step.** Vanilla ES modules, loaded directly by the sidebar page.
   The shipped code is the source code — trivially auditable, and AMO review
   needs no source submission.
@@ -330,13 +332,32 @@ is unchanged.
   with jump links. Folder (project) totals fold in every live timer. No new
   permissions — still pure `storage.local`.
 
-### v0.11 — countdown & reminders (planned)
+### v0.11 — countdown, Pomodoro & reminders (shipped)
 
-- A countdown/Pomodoro mode on the same widget, with a "time's up"
-  notification, and per-note reminders/due dates. These need `alarms` +
-  `notifications` — neither triggers a Firefox install warning nor grants
-  page access, so they stay within the privacy budget. Bundling them keeps
-  the notification plumbing in one place.
+Adds the two things that must fire while the sidebar is **closed**, so the
+scheduling/notification logic lives in the background event page; the panel
+only writes local-only state (`countdown`, `reminders`) that the background
+watches, (re)scheduling `browser.alarms` and raising `browser.notifications`.
+New permissions `alarms` + `notifications` — neither triggers a Firefox
+install warning nor grants page access, so the zero-collection story holds.
+
+- **Countdown / Pomodoro.** The timer panel gains a **Stopwatch / Countdown**
+  tab. Countdown has presets (5/15/25/45 min), Start/Pause/Resume/Reset, and
+  a **Pomodoro** toggle (25 min focus / 5 min break, auto-cycling with a
+  focus-session counter). Remaining time is derived from an `endsAt`
+  timestamp, so a closed sidebar stays accurate; the single "countdown" alarm
+  is (re)scheduled by the background, which on expiry fires the notification
+  and, for Pomodoro, advances the phase and reschedules. One countdown at a
+  time — it's a kitchen timer, kept separate from the billable stopwatch.
+- **Reminders / due dates.** A note's ⋯ menu → **Set reminder…** opens a
+  sheet (datetime picker + quick "in 1h / 3h / tomorrow / next week"). Each
+  reminder gets a `reminder:<noteId>` alarm; on fire the background shows a
+  notification and clears the reminder (one-shot). Clicking the notification
+  opens the sidebar and the note (via an `openNote` flag the panel reads).
+  The list shows a due chip (overdue highlighted). Reminders are a
+  `{ noteId: { at } }` map under the local-only `reminders` key — never
+  synced (which would risk double-firing across devices) — but **included in
+  JSON export/import**. Purging a note drops its reminder.
 
 ### v1.0 — release
 
@@ -349,7 +370,7 @@ is unchanged.
 
 - Full-history export (versioned snapshots)
 - Manual time-entry editing (adjust or add a session by hand)
-- Reminders / countdown — see v0.11 above (needs `alarms` + `notifications`)
+- Recurring reminders; a custom countdown length beyond the presets
 
 ### Decided against (owner's call, 2026-07-20)
 

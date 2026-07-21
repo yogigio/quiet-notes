@@ -20,6 +20,10 @@ import {
   loadAllTimeEntries,
   loadTimers,
   saveTimers,
+  loadCountdown,
+  saveCountdown,
+  loadReminders,
+  saveReminders,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -73,6 +77,20 @@ const ui = {
   timerTotals: $("timer-totals"),
   timerLogLabel: $("timer-log-label"),
   timerEntries: $("timer-entries"),
+  timerTabs: $("timer-tabs"),
+  tabStopwatch: $("tab-stopwatch"),
+  tabCountdown: $("tab-countdown"),
+  timerStopwatch: $("timer-stopwatch"),
+  timerCountdown: $("timer-countdown"),
+  cdPhase: $("cd-phase"),
+  cdDisplay: $("cd-display"),
+  cdState: $("cd-state"),
+  cdPresets: $("cd-presets"),
+  cdPomodoro: $("cd-pomodoro"),
+  cdStart: $("cd-start"),
+  cdPause: $("cd-pause"),
+  cdReset: $("cd-reset"),
+  cdCycles: $("cd-cycles"),
   tags: $("tags"),
   lang: $("lang"),
   glossary: $("glossary"),
@@ -105,6 +123,14 @@ const ui = {
   undoToast: $("undo-toast"),
   undoBtn: $("undo-btn"),
   menuFolder: $("menu-folder"),
+  menuReminder: $("menu-reminder"),
+  reminderSheet: $("reminder-sheet"),
+  reminderFor: $("reminder-for"),
+  reminderAt: $("reminder-at"),
+  reminderQuick: $("reminder-quick"),
+  reminderClear: $("reminder-clear"),
+  reminderCancel: $("reminder-cancel"),
+  reminderSave: $("reminder-save"),
   folderEdit: $("folder-edit"),
   folderEditTitle: $("folder-edit-title"),
   folderName: $("folder-name"),
@@ -159,6 +185,14 @@ let timeEntries = [];
 let folderTimeMs = {};
 let tickHandle = null;
 let resetArmed = false;
+// Countdown/Pomodoro (a single focus timer) and per-note reminders. `countdown`
+// mirrors the local-only "countdown" key the background watches; `reminders` is
+// the { noteId: { at } } map. `cdDraftMin` is the duration picked while idle.
+let countdown = null;
+let reminders = {};
+let cdDraftMin = 25;
+let timerTab = "stopwatch";
+let cdResetArmed = false;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
@@ -507,6 +541,14 @@ function appendCard(note) {
   const time = document.createElement("span");
   time.textContent = relativeTime(note.updatedAt);
   meta.append(time);
+  const reminder = reminders[note.id];
+  if (reminder) {
+    const chip = document.createElement("span");
+    chip.className = "reminder-chip";
+    chip.classList.toggle("overdue", reminder.at < Date.now());
+    chip.textContent = `⏰ ${formatReminder(reminder.at)}`;
+    meta.append(chip);
+  }
   if (!currentFolderId && note.folderId && folders[note.folderId]) {
     const folder = folders[note.folderId];
     const chip = document.createElement("span");
@@ -1040,6 +1082,13 @@ async function purgeNote(id) {
     ensureTick();
     renderTimerChip();
   }
+  // Drop any reminder for the removed note.
+  if (reminders[id]) {
+    const next = { ...reminders };
+    delete next[id];
+    reminders = next;
+    await saveReminders(reminders);
+  }
   await deleteNote(id);
   await refreshFolderTimes();
 }
@@ -1363,6 +1412,7 @@ async function exportAll() {
     notes: sortedNotes(),
     folders: Object.values(folders),
     time,
+    reminders,
   };
   download(
     JSON.stringify(payload, null, 2),
@@ -1410,6 +1460,17 @@ async function importFromFile(file) {
         merged.sort((a, b) => (a.start || 0) - (b.start || 0));
         await saveTimeEntries(noteId, merged);
       }
+    }
+    // Merge reminders (keep the later time on a conflict).
+    if (payload.reminders && typeof payload.reminders === "object") {
+      const merged = { ...reminders };
+      for (const [noteId, r] of Object.entries(payload.reminders)) {
+        if (r && r.at && (!merged[noteId] || r.at > merged[noteId].at)) {
+          merged[noteId] = { at: r.at };
+        }
+      }
+      reminders = merged;
+      await saveReminders(reminders);
     }
     [notes, folders] = await Promise.all([loadNotes(), loadFolders()]);
     if (currentId) timeEntries = await loadTimeEntries(currentId);
@@ -1689,11 +1750,16 @@ function titleFor(id) {
   return note ? titleOf(note) : "a note";
 }
 
-// Keep exactly one ticking interval alive while any timer is running.
+// Keep exactly one ticking interval alive while any timer — a stopwatch or the
+// countdown — is running.
+function needsTick() {
+  return anyRunning() || Boolean(countdown && countdown.running);
+}
+
 function ensureTick() {
-  if (anyRunning() && !tickHandle) {
+  if (needsTick() && !tickHandle) {
     tickHandle = setInterval(paintTimer, 1000);
-  } else if (!anyRunning() && tickHandle) {
+  } else if (!needsTick() && tickHandle) {
     clearInterval(tickHandle);
     tickHandle = null;
   }
@@ -1703,8 +1769,11 @@ function ensureTick() {
 // state is repainted by renderTimer on state changes.
 function paintTimer() {
   const cur = timerFor(currentId);
-  if (cur && !ui.timerPanel.hidden) {
+  if (cur && !ui.timerPanel.hidden && timerTab === "stopwatch") {
     ui.timerDisplay.textContent = formatClock(timerElapsed(cur));
+  }
+  if (countdown && countdown.running && !ui.timerPanel.hidden && timerTab === "countdown") {
+    ui.cdDisplay.textContent = formatClock(countdownRemaining());
   }
   renderTimerChip();
 }
@@ -1833,7 +1902,7 @@ async function resetTimer() {
 function openTimer() {
   ui.historyPanel.hidden = true;
   ui.timerPanel.hidden = false;
-  renderTimer();
+  switchTimerTab(timerTab);
 }
 
 // Full repaint of the timer panel for the open note.
@@ -1982,6 +2051,216 @@ async function refreshFolderTimes() {
   }
 }
 
+// ---- Countdown / Pomodoro ----
+//
+// A single focus timer (one at a time — it's a kitchen timer, not billing).
+// The panel owns the UI and writes the "countdown" state; the background
+// schedules the alarm and, on expiry, fires the notification and (for
+// Pomodoro) advances the phase. Remaining time is derived from endsAt so a
+// closed sidebar stays accurate.
+
+const FOCUS_MS = 25 * 60 * 1000;
+const BREAK_MS = 5 * 60 * 1000;
+
+// A countdown is "active" only while running or paused with time left; a
+// finished one is treated as idle (back to a fresh draft).
+function countdownActive() {
+  return Boolean(countdown && (countdown.running || (countdown.remainingMs || 0) > 0));
+}
+
+function countdownRemaining() {
+  if (countdown && countdown.running && countdown.endsAt) {
+    return Math.max(0, countdown.endsAt - Date.now());
+  }
+  if (countdown && (countdown.remainingMs || 0) > 0) return countdown.remainingMs;
+  return cdDraftMin * 60000; // idle draft
+}
+
+async function persistCountdown() {
+  await saveCountdown(countdown);
+  ensureTick();
+}
+
+async function startCountdown() {
+  const pomodoro = ui.cdPomodoro.checked;
+  if (countdown && !countdown.running && countdown.remainingMs > 0) {
+    // Resume a paused countdown.
+    countdown.endsAt = Date.now() + countdown.remainingMs;
+    countdown.running = true;
+  } else {
+    const dur = pomodoro ? FOCUS_MS : cdDraftMin * 60000;
+    countdown = {
+      phase: "focus",
+      pomodoro,
+      focusMs: FOCUS_MS,
+      breakMs: BREAK_MS,
+      endsAt: Date.now() + dur,
+      remainingMs: dur,
+      running: true,
+      cycles: 0,
+      noteId: currentId || null,
+    };
+  }
+  await persistCountdown();
+  renderCountdown();
+}
+
+async function pauseCountdown() {
+  if (!countdown || !countdown.running) return;
+  countdown.remainingMs = countdownRemaining();
+  countdown.running = false;
+  countdown.endsAt = null;
+  await persistCountdown();
+  renderCountdown();
+}
+
+async function resetCountdown() {
+  if (countdown && countdown.running && !cdResetArmed) {
+    cdResetArmed = true;
+    ui.cdReset.textContent = "Stop?";
+    setTimeout(() => {
+      cdResetArmed = false;
+      ui.cdReset.textContent = "Reset";
+    }, 3000);
+    return;
+  }
+  cdResetArmed = false;
+  ui.cdReset.textContent = "Reset";
+  countdown = null;
+  await persistCountdown();
+  renderCountdown();
+}
+
+function setCountdownPreset(min) {
+  cdDraftMin = min;
+  ui.cdPomodoro.checked = false;
+  if (!countdown || !countdown.running) {
+    countdown = null; // back to an idle draft of the chosen length
+    renderCountdown();
+  }
+}
+
+function renderCountdown() {
+  cdResetArmed = false;
+  ui.cdReset.textContent = "Reset";
+  const active = countdownActive();
+  const running = active && countdown.running;
+  const paused = active && !countdown.running;
+  // While active the mode comes from the countdown; while idle it's the user's
+  // checkbox choice for the next start (never overwritten from a stale timer).
+  const pomodoro = active ? countdown.pomodoro : ui.cdPomodoro.checked;
+
+  ui.cdDisplay.textContent = formatClock(countdownRemaining());
+  ui.cdDisplay.classList.toggle("live", running);
+
+  // Phase pill (Pomodoro only, while active).
+  const showPhase = pomodoro && active;
+  ui.cdPhase.hidden = !showPhase;
+  if (showPhase) {
+    ui.cdPhase.textContent = countdown.phase === "focus" ? "Focus" : "Break";
+    ui.cdPhase.classList.toggle("break", countdown.phase === "break");
+  }
+
+  ui.cdStart.hidden = running;
+  ui.cdStart.textContent = paused ? "Resume" : "Start";
+  ui.cdPause.hidden = !running;
+  ui.cdReset.hidden = !active;
+  ui.cdPresets.classList.toggle("disabled", active);
+  ui.cdPomodoro.disabled = active;
+  ui.cdPomodoro.checked = pomodoro;
+
+  // Highlight the active preset while idle.
+  for (const b of ui.cdPresets.querySelectorAll("button")) {
+    b.classList.toggle("sel", !pomodoro && !active && Number(b.dataset.min) === cdDraftMin);
+  }
+
+  ui.cdState.textContent = running
+    ? pomodoro
+      ? countdown.phase === "focus"
+        ? "Focus — stay on task"
+        : "Break — step away"
+      : "Counting down…"
+    : paused
+      ? "Paused"
+      : "";
+
+  ui.cdCycles.textContent =
+    pomodoro && countdown && countdown.cycles
+      ? `${countdown.cycles} focus session${countdown.cycles > 1 ? "s" : ""} done`
+      : "";
+}
+
+function switchTimerTab(tab) {
+  timerTab = tab;
+  const sw = tab === "stopwatch";
+  ui.tabStopwatch.classList.toggle("active", sw);
+  ui.tabCountdown.classList.toggle("active", !sw);
+  ui.timerStopwatch.hidden = !sw;
+  ui.timerCountdown.hidden = sw;
+  if (sw) renderTimer();
+  else renderCountdown();
+}
+
+// ---- Reminders (per-note due dates) ----
+
+// datetime-local expects "YYYY-MM-DDTHH:MM" in the user's local time.
+function toLocalInput(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Compact due label for the list chip: time if today, "Tmrw HH:MM", else "MMM D".
+function formatReminder(at) {
+  const d = new Date(at);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (d.toDateString() === now.toDateString()) return time;
+  if (d.toDateString() === tomorrow.toDateString()) return `Tmrw ${time}`;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+function refreshReminderMenuItem() {
+  ui.menuReminder.textContent = reminders[currentId] ? "Change reminder…" : "Set reminder…";
+}
+
+function openReminderSheet() {
+  ui.moreMenu.hidden = true;
+  if (!currentId) return;
+  const r = reminders[currentId];
+  const note = notes[currentId];
+  ui.reminderFor.textContent = note ? `“${titleOf(note)}”` : "";
+  ui.reminderAt.value = toLocalInput(r ? r.at : Date.now() + 3600000);
+  ui.reminderClear.hidden = !r;
+  ui.reminderSheet.hidden = false;
+  ui.reminderAt.focus();
+}
+
+function closeReminderSheet() {
+  ui.reminderSheet.hidden = true;
+}
+
+async function saveReminder() {
+  if (!currentId || !ui.reminderAt.value) return;
+  const at = new Date(ui.reminderAt.value).getTime();
+  if (Number.isNaN(at)) return;
+  reminders = { ...reminders, [currentId]: { at } };
+  await saveReminders(reminders);
+  refreshReminderMenuItem();
+  closeReminderSheet();
+}
+
+async function clearReminder() {
+  const next = { ...reminders };
+  delete next[currentId];
+  reminders = next;
+  await saveReminders(reminders);
+  refreshReminderMenuItem();
+  closeReminderSheet();
+}
+
 // ---- Print a single note ----
 
 function escapeForHtml(s) {
@@ -2079,10 +2358,28 @@ ui.more.addEventListener("click", (event) => {
   event.stopPropagation();
   refreshSiteMenuItem();
   refreshFolderMenuItem();
+  refreshReminderMenuItem();
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
 });
 
 ui.menuFolder.addEventListener("click", openFolderPicker);
+ui.menuReminder.addEventListener("click", openReminderSheet);
+ui.reminderSave.addEventListener("click", saveReminder);
+ui.reminderClear.addEventListener("click", clearReminder);
+ui.reminderCancel.addEventListener("click", closeReminderSheet);
+ui.reminderAt.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveReminder();
+  }
+});
+ui.reminderQuick.addEventListener("click", (event) => {
+  const b = event.target.closest("button[data-mins]");
+  if (b) ui.reminderAt.value = toLocalInput(Date.now() + Number(b.dataset.mins) * 60000);
+});
+ui.reminderSheet.addEventListener("click", (event) => {
+  if (event.target === ui.reminderSheet) closeReminderSheet();
+});
 
 // Folder create/edit sheet.
 ui.folderSave.addEventListener("click", saveFolderFromSheet);
@@ -2220,7 +2517,9 @@ ui.editor.addEventListener("keydown", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (!ui.folderEdit.hidden) {
+  if (!ui.reminderSheet.hidden) {
+    closeReminderSheet();
+  } else if (!ui.folderEdit.hidden) {
     closeFolderEdit();
   } else if (!ui.folderPicker.hidden) {
     closeFolderPicker();
@@ -2343,6 +2642,18 @@ ui.timerChip.addEventListener("click", () => {
 ui.timerStart.addEventListener("click", startTimer);
 ui.timerPause.addEventListener("click", pauseTimer);
 ui.timerSave.addEventListener("click", saveTimerSession);
+
+// Stopwatch / Countdown tabs and countdown controls.
+ui.tabStopwatch.addEventListener("click", () => switchTimerTab("stopwatch"));
+ui.tabCountdown.addEventListener("click", () => switchTimerTab("countdown"));
+ui.cdStart.addEventListener("click", startCountdown);
+ui.cdPause.addEventListener("click", pauseCountdown);
+ui.cdReset.addEventListener("click", resetCountdown);
+ui.cdPomodoro.addEventListener("change", renderCountdown);
+ui.cdPresets.addEventListener("click", (event) => {
+  const b = event.target.closest("button[data-min]");
+  if (b) setCountdownPreset(Number(b.dataset.min));
+});
 ui.timerReset.addEventListener("click", resetTimer);
 
 // Wiki-links and backlinks in the preview.
@@ -2492,6 +2803,24 @@ browser.storage.onChanged.addListener(async (changes, area) => {
     timeEntries = changes[`time:${currentId}`].newValue || [];
     if (!ui.timerPanel.hidden) renderTimer();
   }
+  // The background advances/ends the countdown (Pomodoro phase changes, expiry).
+  if ("countdown" in changes) {
+    countdown = changes.countdown.newValue || null;
+    ensureTick();
+    if (!ui.timerPanel.hidden && timerTab === "countdown") renderCountdown();
+  }
+  // Reminders may change when the background fires (and clears) one.
+  if ("reminders" in changes) {
+    reminders = changes.reminders.newValue || {};
+    if (!ui.listView.hidden) renderList();
+    if (currentId) refreshReminderMenuItem();
+  }
+  // A clicked reminder notification asks the panel to open a note.
+  if (changes.openNote && changes.openNote.newValue) {
+    const id = changes.openNote.newValue;
+    await browser.storage.local.remove("openNote");
+    if (notes[id]) openEditor(id);
+  }
 });
 
 onExternalChange(async () => {
@@ -2552,6 +2881,8 @@ onExternalChange(async () => {
     }
   }
   if (prunedTimers) await saveTimers(timers);
+  // Countdown + reminders (both local-only, driven by the background).
+  [countdown, reminders] = await Promise.all([loadCountdown(), loadReminders()]);
   await refreshFolderTimes();
   ensureTick();
   renderTimerChip();
@@ -2564,4 +2895,11 @@ onExternalChange(async () => {
   // If the sidebar was just launched by the quick-capture command, act on it.
   const { quickCapture } = await browser.storage.local.get("quickCapture");
   if (quickCapture) await handleQuickCapture(quickCapture);
+  // If a reminder notification was clicked while the sidebar was closed, open
+  // the note it points at.
+  const { openNote } = await browser.storage.local.get("openNote");
+  if (openNote) {
+    await browser.storage.local.remove("openNote");
+    if (notes[openNote]) await openEditor(openNote);
+  }
 })();

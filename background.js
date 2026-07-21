@@ -11,8 +11,9 @@
 //
 // Two record kinds are mirrored, each in its own namespace: notes
 // ("note:<id>", tombstone "tomb:<id>") and folders ("folder:<id>",
-// tombstone "ftomb:<id>"). history:*, settings, oversized and quickCapture
-// are intentionally local-only and never synced.
+// tombstone "ftomb:<id>"). Everything else — history:*, time:*, timers,
+// countdown, reminders, viewModes, settings, oversized, quickCapture,
+// openNote — is intentionally local-only and never synced.
 //
 // Mirror layout per record (see docs/DESIGN.md):
 //   "<prefix><id>"    header { id, updatedAt, chunkCount, gz }
@@ -104,6 +105,146 @@ async function appendToInbox(text) {
   inbox.updatedAt = now;
   await local.set({ ["note:" + inbox.id]: inbox });
 }
+
+// ---- Alarms & notifications (countdown/Pomodoro + reminders) ----
+//
+// The sidebar page is destroyed when closed, so anything that must fire while
+// it's shut lives here. Two bits of local state drive it:
+//   • "countdown" — the single focus timer (see panel.js for its shape). When
+//     it is running, one "countdown" alarm is scheduled at its endsAt.
+//   • "reminders" — a { noteId: { at } } map; each entry gets a
+//     "reminder:<noteId>" alarm at its time. Both are local-only (never synced).
+// The panel only writes this state; the background reacts to the change,
+// schedules/clears alarms, and fires the notifications.
+
+const FOCUS_DEFAULT_MS = 25 * 60 * 1000;
+const BREAK_DEFAULT_MS = 5 * 60 * 1000;
+
+async function syncCountdownAlarm() {
+  await browser.alarms.clear("countdown");
+  const { countdown } = await local.get("countdown");
+  if (countdown && countdown.running && countdown.endsAt) {
+    browser.alarms.create("countdown", { when: countdown.endsAt });
+  }
+}
+
+async function syncReminderAlarms() {
+  const existing = await browser.alarms.getAll();
+  for (const a of existing) {
+    if (a.name.startsWith("reminder:")) await browser.alarms.clear(a.name);
+  }
+  const { reminders } = await local.get("reminders");
+  for (const [noteId, r] of Object.entries(reminders || {})) {
+    if (r && r.at) browser.alarms.create("reminder:" + noteId, { when: r.at });
+  }
+}
+
+async function titleForNote(noteId) {
+  if (!noteId) return "";
+  const rec = (await local.get("note:" + noteId))["note:" + noteId];
+  if (!rec) return "";
+  const line = rec.body.split("\n").find((l) => l.trim() !== "");
+  return line ? line.trim().replace(/^#+\s*/, "").slice(0, 60) : "Untitled";
+}
+
+function notify(id, title, message) {
+  browser.notifications.create(id, {
+    type: "basic",
+    iconUrl: browser.runtime.getURL("icons/note.svg"),
+    title: "Quiet Notes — " + title,
+    message: message || "",
+  });
+}
+
+async function fireCountdown() {
+  const { countdown } = await local.get("countdown");
+  if (!countdown || !countdown.running) return;
+  const noteTitle = await titleForNote(countdown.noteId);
+  if (countdown.pomodoro) {
+    const finishedFocus = countdown.phase === "focus";
+    notify(
+      "countdown",
+      finishedFocus ? "Focus session done" : "Break over",
+      finishedFocus
+        ? "Time for a break."
+        : noteTitle
+          ? `Back to: ${noteTitle}`
+          : "Back to work."
+    );
+    // Auto-advance to the next phase and keep running; the storage change
+    // reschedules the alarm.
+    const nextPhase = finishedFocus ? "break" : "focus";
+    const dur =
+      nextPhase === "focus"
+        ? countdown.focusMs || FOCUS_DEFAULT_MS
+        : countdown.breakMs || BREAK_DEFAULT_MS;
+    await local.set({
+      countdown: {
+        ...countdown,
+        phase: nextPhase,
+        endsAt: Date.now() + dur,
+        remainingMs: dur,
+        running: true,
+        cycles: countdown.cycles + (finishedFocus ? 1 : 0),
+      },
+    });
+  } else {
+    notify(
+      "countdown",
+      "Time's up",
+      noteTitle ? `Countdown finished · ${noteTitle}` : "Your countdown finished."
+    );
+    // Clear it; the panel then shows a fresh idle draft.
+    await local.remove("countdown");
+  }
+}
+
+async function fireReminder(noteId) {
+  const { reminders } = await local.get("reminders");
+  const r = reminders && reminders[noteId];
+  if (!r) return;
+  const title = await titleForNote(noteId);
+  notify("reminder:" + noteId, "Reminder", title || "A note is due.");
+  // One-shot: drop it after firing so it doesn't re-fire on restart.
+  const next = { ...reminders };
+  delete next[noteId];
+  await local.set({ reminders: next });
+}
+
+browser.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === "countdown") await fireCountdown();
+  else if (alarm.name.startsWith("reminder:")) {
+    await fireReminder(alarm.name.slice("reminder:".length));
+  }
+});
+
+// Clicking a notification opens the sidebar (and, for a reminder, flags which
+// note to open — the panel reads "openNote"). sidebarAction.open() may be
+// rejected outside a user gesture; the flag still gets the note opened next
+// time the sidebar is shown.
+browser.notifications.onClicked.addListener((id) => {
+  try {
+    browser.sidebarAction.open();
+  } catch {
+    // Not a user gesture on this platform; the flag below still applies.
+  }
+  if (id.startsWith("reminder:")) {
+    local.set({ openNote: id.slice("reminder:".length) });
+  }
+  browser.notifications.clear(id);
+});
+
+// Reschedule when the panel changes the state, and on browser startup.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.countdown) syncCountdownAlarm();
+  if (changes.reminders) syncReminderAlarms();
+});
+
+browser.runtime.onStartup.addListener(() => {
+  syncCountdownAlarm();
+  syncReminderAlarms();
+});
 
 // ---- Sync engine ----
 
