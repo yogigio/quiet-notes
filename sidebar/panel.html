@@ -179,6 +179,10 @@
             <button type="button" data-min="15">15m</button>
             <button type="button" data-min="25">25m</button>
             <button type="button" data-min="45">45m</button>
+            <label class="cd-custom-wrap">
+              <input id="cd-custom" type="number" min="1" max="600" step="1"
+                     inputmode="numeric" aria-label="Custom minutes"> min
+            </label>
           </div>
           <label class="check-row slim" id="cd-pomodoro-row">
             <input type="checkbox" id="cd-pomodoro">
@@ -270,6 +274,12 @@
           </select>
         </div>
         <p class="hint" id="timer-mode-hint"></p>
+        <label class="check-row slim">
+          <input type="checkbox" id="timer-sound">
+          <span>Play a sound when a countdown or Pomodoro phase ends</span>
+        </label>
+        <p class="hint">Plays only while the sidebar is open. When it's closed,
+          your system's notification sound is the cue.</p>
       </section>
       <section class="setting">
         <strong>Trash</strong>

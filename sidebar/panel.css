@@ -995,8 +995,30 @@ body.mono #preview {
 #cd-presets {
   display: flex;
   justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
+.cd-custom-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+#cd-custom {
+  width: 3.4em;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9em;
+  text-align: center;
+}
+#cd-custom:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#cd-custom:disabled { opacity: 0.5; }
 #cd-presets button {
   padding: 5px 12px;
   border: 1px solid var(--border);
@@ -1298,6 +1320,7 @@ body.mono #preview {
 }
 
 .wide-btn:hover { background: var(--hover); }
+.wide-btn + .wide-btn { margin-top: 8px; }
 
 .setting > strong { display: block; margin-bottom: 2px; }
 

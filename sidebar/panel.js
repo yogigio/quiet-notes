@@ -86,6 +86,7 @@ const ui = {
   cdDisplay: $("cd-display"),
   cdState: $("cd-state"),
   cdPresets: $("cd-presets"),
+  cdCustom: $("cd-custom"),
   cdPomodoro: $("cd-pomodoro"),
   cdStart: $("cd-start"),
   cdPause: $("cd-pause"),
@@ -118,6 +119,7 @@ const ui = {
   monoToggle: $("mono-toggle"),
   timerMode: $("timer-mode"),
   timerModeHint: $("timer-mode-hint"),
+  timerSound: $("timer-sound"),
   trashList: $("trash-list"),
   emptyTrash: $("empty-trash"),
   undoToast: $("undo-toast"),
@@ -1197,6 +1199,7 @@ function renderSettingsControls() {
   ui.monoToggle.checked = Boolean(settings.mono);
   ui.timerMode.value = timerMode();
   renderTimerModeHint();
+  ui.timerSound.checked = Boolean(settings.timerSound);
   ui.siteToggle.checked = sitePermission;
 }
 
@@ -2062,6 +2065,40 @@ async function refreshFolderTimes() {
 const FOCUS_MS = 25 * 60 * 1000;
 const BREAK_MS = 5 * 60 * 1000;
 
+// A short two-tone chime generated with WebAudio — no bundled asset, no
+// permission. The context is created/resumed during a click (see
+// startCountdown) so later playback isn't blocked by the autoplay policy.
+// Only used while the sidebar is open; a closed sidebar relies on the OS
+// notification sound.
+let audioCtx = null;
+function ensureAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  } catch {
+    audioCtx = null;
+  }
+  return audioCtx;
+}
+
+function playChime() {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  for (const [freq, t] of [[880, 0], [1174.7, 0.16]]) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, now + t);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.32);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + t);
+    osc.stop(now + t + 0.36);
+  }
+}
+
 // A countdown is "active" only while running or paused with time left; a
 // finished one is treated as idle (back to a fresh draft).
 function countdownActive() {
@@ -2082,6 +2119,9 @@ async function persistCountdown() {
 }
 
 async function startCountdown() {
+  // Prime the audio context during this click gesture so the end-of-phase
+  // chime can play later without the autoplay policy blocking it.
+  if (settings.timerSound) ensureAudio();
   const pomodoro = ui.cdPomodoro.checked;
   if (countdown && !countdown.running && countdown.remainingMs > 0) {
     // Resume a paused countdown.
@@ -2165,9 +2205,16 @@ function renderCountdown() {
   ui.cdStart.textContent = paused ? "Resume" : "Start";
   ui.cdPause.hidden = !running;
   ui.cdReset.hidden = !active;
-  ui.cdPresets.classList.toggle("disabled", active);
+  // Presets/custom don't apply while a timer is active or in Pomodoro mode.
+  const lockDuration = active || pomodoro;
+  ui.cdPresets.classList.toggle("disabled", lockDuration);
+  ui.cdCustom.disabled = lockDuration;
   ui.cdPomodoro.disabled = active;
   ui.cdPomodoro.checked = pomodoro;
+  // Keep the custom field showing the current draft length while idle.
+  if (!active && document.activeElement !== ui.cdCustom) {
+    ui.cdCustom.value = String(cdDraftMin);
+  }
 
   // Highlight the active preset while idle.
   for (const b of ui.cdPresets.querySelectorAll("button")) {
@@ -2654,6 +2701,31 @@ ui.cdPresets.addEventListener("click", (event) => {
   const b = event.target.closest("button[data-min]");
   if (b) setCountdownPreset(Number(b.dataset.min));
 });
+// Custom minutes: update the draft length live without fighting the typist.
+ui.cdCustom.addEventListener("input", () => {
+  const v = parseInt(ui.cdCustom.value, 10);
+  if (Number.isNaN(v)) return;
+  cdDraftMin = Math.min(600, Math.max(1, v));
+  ui.cdPomodoro.checked = false;
+  if (!countdownActive()) {
+    countdown = null;
+    ui.cdDisplay.textContent = formatClock(cdDraftMin * 60000);
+    for (const b of ui.cdPresets.querySelectorAll("button")) {
+      b.classList.toggle("sel", Number(b.dataset.min) === cdDraftMin);
+    }
+  }
+});
+ui.cdCustom.addEventListener("change", () => {
+  ui.cdCustom.value = String(cdDraftMin); // normalize to the clamped value
+  renderCountdown();
+});
+ui.cdCustom.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    ui.cdCustom.value = String(cdDraftMin);
+    startCountdown();
+  }
+});
 ui.timerReset.addEventListener("click", resetTimer);
 
 // Wiki-links and backlinks in the preview.
@@ -2743,6 +2815,13 @@ ui.timerMode.addEventListener("change", async () => {
   await saveSettings(settings);
 });
 
+ui.timerSound.addEventListener("change", async () => {
+  settings.timerSound = ui.timerSound.checked;
+  // Enabling it is a user gesture — prime audio and give an audible preview.
+  if (settings.timerSound) playChime();
+  await saveSettings(settings);
+});
+
 ui.emptyTrash.addEventListener("click", async () => {
   for (const note of trashedNotes()) await purgeNote(note.id);
   renderTrash();
@@ -2808,6 +2887,10 @@ browser.storage.onChanged.addListener(async (changes, area) => {
     countdown = changes.countdown.newValue || null;
     ensureTick();
     if (!ui.timerPanel.hidden && timerTab === "countdown") renderCountdown();
+  }
+  // The background flags each phase end here; play the optional chime.
+  if (changes.countdownEnded && changes.countdownEnded.newValue && settings.timerSound) {
+    playChime();
   }
   // Reminders may change when the background fires (and clears) one.
   if ("reminders" in changes) {

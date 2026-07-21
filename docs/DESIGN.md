@@ -20,8 +20,8 @@ end-to-end encryption — no third-party or first-party servers, ever.
   mirroring. Sibling namespaces that are intentionally **not** synced (the
   mirror only copies `note:`/`folder:` keys): `history:<id>` (version
   snapshots), `time:<id>` (tracked sessions), `timers`/`countdown` (active
-  timers), `reminders`, `viewModes`, `settings`, `oversized`, `quickCapture`,
-  `openNote`.
+  timers), `countdownEnded`, `reminders`, `viewModes`, `settings`, `oversized`,
+  `quickCapture`, `openNote`.
 - **No build step.** Vanilla ES modules, loaded directly by the sidebar page.
   The shipped code is the source code — trivially auditable, and AMO review
   needs no source submission.
@@ -342,13 +342,22 @@ New permissions `alarms` + `notifications` — neither triggers a Firefox
 install warning nor grants page access, so the zero-collection story holds.
 
 - **Countdown / Pomodoro.** The timer panel gains a **Stopwatch / Countdown**
-  tab. Countdown has presets (5/15/25/45 min), Start/Pause/Resume/Reset, and
-  a **Pomodoro** toggle (25 min focus / 5 min break, auto-cycling with a
-  focus-session counter). Remaining time is derived from an `endsAt`
-  timestamp, so a closed sidebar stays accurate; the single "countdown" alarm
-  is (re)scheduled by the background, which on expiry fires the notification
-  and, for Pomodoro, advances the phase and reschedules. One countdown at a
-  time — it's a kitchen timer, kept separate from the billable stopwatch.
+  tab. Countdown has presets (5/15/25/45 min) **plus a custom-minutes field
+  (1–600)**, Start/Pause/Resume/Reset, and a **Pomodoro** toggle (25 min focus
+  / 5 min break, auto-cycling with a focus-session counter). Remaining time is
+  derived from an `endsAt` timestamp, so a closed sidebar stays accurate; the
+  single "countdown" alarm is (re)scheduled by the background, which on expiry
+  fires the notification and, for Pomodoro, advances the phase and reschedules.
+  There is one countdown at a time (it's a kitchen timer), but it is
+  **independent of the billable stopwatch** — a Pomodoro focus timer and a
+  note's stopwatch can run at the same time.
+- **Optional end-of-phase chime.** Settings → Time tracking → "Play a sound…"
+  (default off) plays a short WebAudio two-tone chime — no bundled asset, no
+  permission — when a countdown/Pomodoro phase ends **while the sidebar is
+  open**. The background sets a `countdownEnded` timestamp on each real expiry
+  (distinct from a manual pause/reset, which never chime) and the panel reacts.
+  When the sidebar is closed the OS notification sound is the cue. The audio
+  context is created during the Start click so autoplay policy doesn't block it.
 - **Reminders / due dates.** A note's ⋯ menu → **Set reminder…** opens a
   sheet (datetime picker + quick "in 1h / 3h / tomorrow / next week"). Each
   reminder gets a `reminder:<noteId>` alarm; on fire the background shows a

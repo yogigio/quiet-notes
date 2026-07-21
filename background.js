@@ -12,8 +12,8 @@
 // Two record kinds are mirrored, each in its own namespace: notes
 // ("note:<id>", tombstone "tomb:<id>") and folders ("folder:<id>",
 // tombstone "ftomb:<id>"). Everything else — history:*, time:*, timers,
-// countdown, reminders, viewModes, settings, oversized, quickCapture,
-// openNote — is intentionally local-only and never synced.
+// countdown, countdownEnded, reminders, viewModes, settings, oversized,
+// quickCapture, openNote — is intentionally local-only and never synced.
 //
 // Mirror layout per record (see docs/DESIGN.md):
 //   "<prefix><id>"    header { id, updatedAt, chunkCount, gz }
@@ -159,6 +159,9 @@ function notify(id, title, message) {
 async function fireCountdown() {
   const { countdown } = await local.get("countdown");
   if (!countdown || !countdown.running) return;
+  // Unambiguous "a phase just ended" signal for the panel's optional chime
+  // (distinct from a manual pause/reset, which never touch this key).
+  await local.set({ countdownEnded: Date.now() });
   const noteTitle = await titleForNote(countdown.noteId);
   if (countdown.pomodoro) {
     const finishedFocus = countdown.phase === "focus";
