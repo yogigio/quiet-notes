@@ -275,6 +275,46 @@ general editor behavior that helps every note:
 - Settings → Appearance → **"Open notes in"**: `Last used` (default),
   `Write`, or `Preview`.
 
+### v0.10 — time tracking (shipped)
+
+A per-note/per-project stopwatch built on standard time-tracker practice
+(the Toggl/Clockify/Harvest model), so a translator can log billable time
+where the work happens.
+
+- **One global timer, attached to a note.** A stopwatch button in the
+  editor bar opens a Timer panel; **Start → Pause/Resume → Save/Reset.**
+  Pause/Resume accumulate; **Save** commits the elapsed span as a *session
+  entry*, so time is logged, not just cleared; **Reset** is a two-step
+  "Discard?" that throws the running span away. Sessions under a minute are
+  dropped rather than logged.
+- **Runs in the background.** The active timer lives under a single
+  `timer` key in `storage.local`, and elapsed is always derived from a
+  `runningSince` timestamp — never a counter we increment. Closing the
+  sidebar (or the whole browser) loses nothing: on load the timer resumes
+  and the 1 s tick restarts. A footer chip shows the live time whenever a
+  timer is active (a pulsing dot = running), visible even while a different
+  note is open; that note's panel then shows a "Running on '…' — Go to it"
+  banner. Starting a timer on a second note auto-commits the first, the
+  standard single-timer behavior.
+- **Rollups.** The panel shows the note's total plus **words/hour** (reusing
+  the existing word count). Folders are projects: each folder row and the
+  folder header show the **project's total tracked time**, live-updating.
+- **Storage & privacy.** Sessions live under `time:<id>`, deliberately out
+  of the `note:` namespace so the sync engine never mirrors them (local-only,
+  free of the sync quota) — but they **are** included in JSON export/import,
+  since billable hours must be backup-able; import merges by session start
+  timestamp so a re-import never doubles hours. Purging a note drops its
+  sessions and any running timer. **No new permissions** — pure
+  `storage.local`, so the zero-collection/no-install-warning story is intact.
+
+### v0.11 — countdown & reminders (planned)
+
+- A countdown/Pomodoro mode on the same widget, with a "time's up"
+  notification, and per-note reminders/due dates. These need `alarms` +
+  `notifications` — neither triggers a Firefox install warning nor grants
+  page access, so they stay within the privacy budget. Bundling them keeps
+  the notification plumbing in one place.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)
@@ -285,7 +325,8 @@ general editor behavior that helps every note:
 ### Later / maybe
 
 - Full-history export (versioned snapshots)
-- Reminders (would need the `notifications` permission)
+- Manual time-entry editing (adjust or add a session by hand)
+- Reminders / countdown — see v0.11 above (needs `alarms` + `notifications`)
 
 ### Decided against (owner's call, 2026-07-20)
 

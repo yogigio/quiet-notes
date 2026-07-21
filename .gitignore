@@ -1,5 +1,6 @@
 web-ext-artifacts/
 .claude/
+sidebar/test-harness.html
 node_modules/
 .DS_Store
 Thumbs.db

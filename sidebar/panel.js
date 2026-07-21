@@ -15,6 +15,11 @@ import {
   loadFolders,
   saveFolder,
   deleteFolder,
+  loadTimeEntries,
+  saveTimeEntries,
+  loadAllTimeEntries,
+  loadActiveTimer,
+  saveActiveTimer,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -53,6 +58,21 @@ const ui = {
   historyPanel: $("history-panel"),
   historyClose: $("history-close"),
   historyList: $("history-list"),
+  timerBtn: $("timer-btn"),
+  timerChip: $("timer-chip"),
+  timerChipTime: $("timer-chip-time"),
+  timerPanel: $("timer-panel"),
+  timerClose: $("timer-close"),
+  timerElsewhere: $("timer-elsewhere"),
+  timerDisplay: $("timer-display"),
+  timerState: $("timer-state"),
+  timerStart: $("timer-start"),
+  timerPause: $("timer-pause"),
+  timerSave: $("timer-save"),
+  timerReset: $("timer-reset"),
+  timerTotals: $("timer-totals"),
+  timerLogLabel: $("timer-log-label"),
+  timerEntries: $("timer-entries"),
   tags: $("tags"),
   lang: $("lang"),
   glossary: $("glossary"),
@@ -127,6 +147,15 @@ let lastSnapshotAt = 0;
 let findMatches = [];
 let findIndex = -1;
 let quickCaptureHandled = 0;
+// Time tracking. `activeTimer` is the single global timer (or null); it lives
+// in storage.local so it keeps counting while the sidebar is closed. `timeEntries`
+// is the open note's saved sessions; `folderTimeMs` caches per-folder totals for
+// the list. `tickHandle` is the 1s interval that repaints live displays.
+let activeTimer = null;
+let timeEntries = [];
+let folderTimeMs = {};
+let tickHandle = null;
+let resetArmed = false;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
@@ -328,13 +357,21 @@ function renderFolderSection() {
     title.className = "folder-title";
     title.textContent = folder.name || "Untitled folder";
 
+    const time = document.createElement("span");
+    time.className = "folder-bar-time";
+    const fMs = folderTimeMs[folder.id] || 0;
+    if (fMs) {
+      time.textContent = formatTotal(fMs);
+      time.title = "Total time tracked across this project's notes";
+    }
+
     const edit = document.createElement("button");
     edit.className = "icon-btn";
     edit.title = "Edit folder";
     edit.textContent = "✎";
     edit.addEventListener("click", () => openFolderEdit(folder.id));
 
-    bar.append(back, accent, emoji, title, edit);
+    bar.append(back, accent, emoji, title, time, edit);
     ui.folderSection.append(bar);
     return;
   }
@@ -370,14 +407,17 @@ function renderFolderSection() {
     const name = document.createElement("span");
     name.className = "folder-name";
     name.textContent = folder.name || "Untitled folder";
-    const count = document.createElement("span");
-    count.className = "folder-count";
-    count.textContent = String(folderNoteCount(folder.id));
+    const meta = document.createElement("span");
+    meta.className = "folder-count";
+    const fMs = folderTimeMs[folder.id] || 0;
+    meta.textContent = fMs
+      ? `${folderNoteCount(folder.id)} · ${formatTotal(fMs)}`
+      : String(folderNoteCount(folder.id));
     const chevron = document.createElement("span");
     chevron.className = "folder-chevron";
     chevron.append(svgIcon(ICON_CHEVRON));
 
-    row.append(emoji, name, count, chevron);
+    row.append(emoji, name, meta, chevron);
     ui.folderSection.append(row);
   }
 }
@@ -686,6 +726,7 @@ function openList() {
   disarmDelete();
   closeFind();
   ui.historyPanel.hidden = true;
+  ui.timerPanel.hidden = true;
   showView("list");
   renderList();
 }
@@ -724,11 +765,16 @@ async function openEditor(id) {
   renderGlossaryControls(note);
   closeFind();
   ui.historyPanel.hidden = true;
+  ui.timerPanel.hidden = true;
   lastSnapshotAt = 0;
-  currentHistory = await loadHistory(id);
+  [currentHistory, timeEntries] = await Promise.all([
+    loadHistory(id),
+    loadTimeEntries(id),
+  ]);
   showView("editor");
   ui.saveState.textContent = "";
   renderCounts();
+  renderTimerChip();
   setMode(initialModeFor(note));
 }
 
@@ -984,7 +1030,15 @@ async function purgeNote(id) {
     delete viewModes[id];
     await saveViewModes(viewModes);
   }
+  // Drop a running timer tied to the note being permanently removed.
+  if (activeTimer && activeTimer.noteId === id) {
+    activeTimer = null;
+    await saveActiveTimer(null);
+    ensureTick();
+    renderTimerChip();
+  }
   await deleteNote(id);
+  await refreshFolderTimes();
 }
 
 // ---- Settings ----
@@ -1278,13 +1332,20 @@ function download(content, type, filename) {
   URL.revokeObjectURL(link.href);
 }
 
-function exportAll() {
+async function exportAll() {
+  // Time sessions live outside the note record, so pull them in for backup.
+  const allTime = await loadAllTimeEntries();
+  const time = {};
+  for (const note of sortedNotes()) {
+    if (allTime[note.id] && allTime[note.id].length) time[note.id] = allTime[note.id];
+  }
   const payload = {
     app: "quiet-notes",
     format: 1,
     exportedAt: new Date().toISOString(),
     notes: sortedNotes(),
     folders: Object.values(folders),
+    time,
   };
   download(
     JSON.stringify(payload, null, 2),
@@ -1321,7 +1382,21 @@ async function importFromFile(file) {
         if (!existing || folder.updatedAt > existing.updatedAt) await saveFolder(folder);
       }
     }
+    // Merge time sessions, de-duplicated by their start timestamp so a
+    // re-import never doubles logged hours.
+    if (payload.time && typeof payload.time === "object") {
+      for (const [noteId, incoming] of Object.entries(payload.time)) {
+        if (!Array.isArray(incoming) || !incoming.length) continue;
+        const current = await loadTimeEntries(noteId);
+        const seen = new Set(current.map((e) => e.start));
+        const merged = current.concat(incoming.filter((e) => !seen.has(e.start)));
+        merged.sort((a, b) => (a.start || 0) - (b.start || 0));
+        await saveTimeEntries(noteId, merged);
+      }
+    }
     [notes, folders] = await Promise.all([loadNotes(), loadFolders()]);
+    if (currentId) timeEntries = await loadTimeEntries(currentId);
+    await refreshFolderTimes();
     renderList();
     ui.import.textContent = `+${added} / ~${updated}`;
   } catch {
@@ -1538,6 +1613,333 @@ async function restoreSnapshot(snap) {
   renderCounts();
   ui.historyPanel.hidden = true;
   setMode("write");
+}
+
+// ---- Time tracking ----
+//
+// One global timer at a time (the Toggl/Clockify model). It is attached to a
+// note and persisted under the "timer" key, so it keeps counting while the
+// sidebar is closed or the user works in other notes. Pause/resume accumulate
+// time; Save commits the elapsed span as a session entry under "time:<id>";
+// Reset discards it. Elapsed is always derived from timestamps, never from a
+// counter we increment — so a closed sidebar loses nothing.
+
+function timerElapsed(timer) {
+  if (!timer) return 0;
+  const live = timer.runningSince ? Date.now() - timer.runningSince : 0;
+  return timer.accumulatedMs + live;
+}
+
+function timerRunning() {
+  return Boolean(activeTimer && activeTimer.runningSince);
+}
+
+// H:MM:SS for the live clock.
+function formatClock(ms) {
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${h}:${pad(m)}:${pad(s)}`;
+}
+
+// Compact human totals: "2h 15m", "45m", "38s". Used for rollups and the chip.
+function formatTotal(ms) {
+  const total = Math.round(ms / 1000);
+  if (total < 60) return `${total}s`;
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
+function entriesTotalMs(entries) {
+  return entries.reduce((sum, e) => sum + (e.ms || 0), 0);
+}
+
+// Total tracked time for a note = saved sessions + any live active timer on it.
+function noteTotalMs(id, entries) {
+  let ms = entriesTotalMs(entries || []);
+  if (activeTimer && activeTimer.noteId === id) ms += timerElapsed(activeTimer);
+  return ms;
+}
+
+// Keep exactly one ticking interval alive while a timer is running.
+function ensureTick() {
+  if (timerRunning() && !tickHandle) {
+    tickHandle = setInterval(paintTimer, 1000);
+  } else if (!timerRunning() && tickHandle) {
+    clearInterval(tickHandle);
+    tickHandle = null;
+  }
+}
+
+// Repaint only the live numbers (cheap; runs every second). Full control
+// state is repainted by renderTimer on state changes.
+function paintTimer() {
+  const elapsed = timerElapsed(activeTimer);
+  if (activeTimer && activeTimer.noteId === currentId && !ui.timerPanel.hidden) {
+    ui.timerDisplay.textContent = formatClock(elapsed);
+  }
+  renderTimerChip();
+}
+
+// The always-visible footer chip: shows the live time whenever a timer is
+// active, so tracking is never silently running. A pulsing dot means running.
+function renderTimerChip() {
+  if (!activeTimer) {
+    ui.timerChip.hidden = true;
+    return;
+  }
+  ui.timerChip.hidden = false;
+  ui.timerChip.classList.toggle("running", timerRunning());
+  ui.timerChip.classList.toggle("other", activeTimer.noteId !== currentId);
+  ui.timerChipTime.textContent = formatClock(timerElapsed(activeTimer));
+  const onThis = activeTimer.noteId === currentId;
+  ui.timerChip.title = onThis
+    ? timerRunning()
+      ? "Timer running — open time tracker"
+      : "Timer paused — open time tracker"
+    : `Timer ${timerRunning() ? "running" : "paused"} on "${otherTimerTitle()}" — open`;
+  // The stopwatch button in the bar also lights up when tracking this note.
+  ui.timerBtn.classList.toggle("active", onThis);
+}
+
+function otherTimerTitle() {
+  const note = activeTimer && notes[activeTimer.noteId];
+  return note ? titleOf(note) : "another note";
+}
+
+async function persistTimer() {
+  await saveActiveTimer(activeTimer);
+  ensureTick();
+  renderTimerChip();
+}
+
+// Start (or resume) tracking the open note. If a timer is already running on a
+// different note, commit that one first — the standard single-timer behavior.
+async function startTimer() {
+  if (!currentId) return;
+  if (activeTimer && activeTimer.noteId !== currentId) {
+    await commitTimer(); // saves the other note's session, clears activeTimer
+  }
+  if (!activeTimer) {
+    activeTimer = { noteId: currentId, accumulatedMs: 0, runningSince: Date.now() };
+  } else if (!activeTimer.runningSince) {
+    activeTimer.runningSince = Date.now(); // resume from pause
+  }
+  await persistTimer();
+  renderTimer();
+}
+
+async function pauseTimer() {
+  if (!timerRunning()) return;
+  activeTimer.accumulatedMs = timerElapsed(activeTimer);
+  activeTimer.runningSince = null;
+  await persistTimer();
+  renderTimer();
+}
+
+// Commit the active timer's elapsed time as a saved session on its note, then
+// clear it. Returns the note id it was saved to (or null). Sessions under one
+// minute are dropped as accidental taps rather than logged.
+async function commitTimer() {
+  if (!activeTimer) return null;
+  const id = activeTimer.noteId;
+  const ms = timerElapsed(activeTimer);
+  activeTimer = null;
+  await saveActiveTimer(null);
+  if (ms >= 60000) {
+    const entries = id === currentId ? timeEntries : await loadTimeEntries(id);
+    entries.push({ start: Date.now() - ms, end: Date.now(), ms });
+    await saveTimeEntries(id, entries);
+    if (id === currentId) timeEntries = entries;
+  }
+  await refreshFolderTimes();
+  ensureTick();
+  return id;
+}
+
+async function saveTimerSession() {
+  if (!activeTimer || activeTimer.noteId !== currentId) return;
+  const ms = timerElapsed(activeTimer);
+  await commitTimer();
+  renderTimer();
+  renderTimerChip();
+  if (ms < 60000) {
+    // Too short to log; tell the user rather than silently dropping it.
+    ui.timerState.textContent = "Under a minute — not logged.";
+  }
+}
+
+async function resetTimer() {
+  if (!activeTimer || activeTimer.noteId !== currentId) return;
+  if (!resetArmed) {
+    resetArmed = true;
+    ui.timerReset.textContent = "Discard?";
+    setTimeout(() => {
+      resetArmed = false;
+      ui.timerReset.textContent = "Reset";
+    }, 3000);
+    return;
+  }
+  resetArmed = false;
+  activeTimer = null;
+  await saveActiveTimer(null);
+  ensureTick();
+  renderTimer();
+  renderTimerChip();
+}
+
+function openTimer() {
+  ui.historyPanel.hidden = true;
+  ui.timerPanel.hidden = false;
+  renderTimer();
+}
+
+// Full repaint of the timer panel for the open note.
+function renderTimer() {
+  resetArmed = false;
+  ui.timerReset.textContent = "Reset";
+  const onThis = activeTimer && activeTimer.noteId === currentId;
+  const elsewhere = activeTimer && activeTimer.noteId !== currentId;
+
+  // Banner when a timer is running on another note.
+  ui.timerElsewhere.hidden = !elsewhere;
+  if (elsewhere) {
+    ui.timerElsewhere.textContent = "";
+    const label = document.createElement("span");
+    label.textContent = `${timerRunning() ? "Running" : "Paused"} on "${otherTimerTitle()}"`;
+    const go = document.createElement("button");
+    go.className = "link-btn";
+    go.textContent = "Go to it";
+    go.addEventListener("click", () => openEditor(activeTimer.noteId));
+    ui.timerElsewhere.append(label, go);
+  }
+
+  ui.timerDisplay.textContent = formatClock(onThis ? timerElapsed(activeTimer) : 0);
+  ui.timerDisplay.classList.toggle("live", Boolean(onThis && timerRunning()));
+
+  // Controls reflect the timer's state for THIS note.
+  const running = onThis && timerRunning();
+  const paused = onThis && !timerRunning();
+  ui.timerStart.hidden = onThis && running;
+  ui.timerStart.textContent = paused ? "Resume" : "Start";
+  ui.timerPause.hidden = !running;
+  ui.timerSave.hidden = !onThis;
+  ui.timerReset.hidden = !onThis;
+  ui.timerState.textContent = running
+    ? "Tracking…"
+    : paused
+      ? "Paused"
+      : "";
+
+  renderTimerTotals();
+  renderTimerEntries();
+  renderTimerChip();
+}
+
+function renderTimerTotals() {
+  const note = notes[currentId];
+  const totalMs = noteTotalMs(currentId, timeEntries);
+  ui.timerTotals.textContent = "";
+  if (!totalMs) {
+    const p = document.createElement("span");
+    p.className = "hint";
+    p.textContent = "No time logged on this note yet.";
+    ui.timerTotals.append(p);
+    return;
+  }
+  const total = document.createElement("div");
+  total.className = "timer-total";
+  total.textContent = `${formatTotal(totalMs)} on this note`;
+  ui.timerTotals.append(total);
+
+  // Words per hour — pairs the existing word count with tracked time.
+  const words = note ? wordCount(note.body) : 0;
+  const hours = totalMs / 3600000;
+  if (words && hours > 0.0167) {
+    const wph = Math.round(words / hours);
+    const rate = document.createElement("div");
+    rate.className = "hint";
+    rate.textContent = `${words} words · ~${wph} words/hour`;
+    ui.timerTotals.append(rate);
+  }
+
+  // Project (folder) rollup.
+  if (note && note.folderId && folders[note.folderId]) {
+    const fMs = folderTimeMs[note.folderId] || 0;
+    if (fMs) {
+      const proj = document.createElement("div");
+      proj.className = "hint";
+      const f = folders[note.folderId];
+      proj.textContent = `${f.icon || "📁"} ${f.name || "Folder"}: ${formatTotal(fMs)} total`;
+      ui.timerTotals.append(proj);
+    }
+  }
+}
+
+function renderTimerEntries() {
+  ui.timerEntries.textContent = "";
+  ui.timerLogLabel.hidden = timeEntries.length === 0;
+  // Newest first.
+  [...timeEntries]
+    .map((e, i) => ({ e, i }))
+    .reverse()
+    .forEach(({ e, i }) => {
+      const row = document.createElement("div");
+      row.className = "timer-entry";
+      const when = document.createElement("span");
+      when.className = "te-when";
+      when.textContent = entryWhen(e);
+      const dur = document.createElement("span");
+      dur.className = "te-dur";
+      dur.textContent = formatTotal(e.ms);
+      const del = document.createElement("button");
+      del.className = "te-del";
+      del.title = "Delete session";
+      del.textContent = "✕";
+      del.addEventListener("click", () => deleteEntry(i));
+      row.append(when, dur, del);
+      ui.timerEntries.append(row);
+    });
+}
+
+function entryWhen(entry) {
+  const d = new Date(entry.end || entry.start || Date.now());
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString()} ${time}`;
+}
+
+async function deleteEntry(index) {
+  timeEntries.splice(index, 1);
+  await saveTimeEntries(currentId, timeEntries);
+  await refreshFolderTimes();
+  renderTimer();
+}
+
+// Recompute per-folder totals from all notes' time entries (for the list).
+async function refreshFolderTimes() {
+  const all = await loadAllTimeEntries();
+  folderTimeMs = {};
+  for (const [noteId, entries] of Object.entries(all)) {
+    const note = notes[noteId];
+    if (!note || !note.folderId || note.deletedAt) continue;
+    folderTimeMs[note.folderId] =
+      (folderTimeMs[note.folderId] || 0) + entriesTotalMs(entries);
+  }
+  // Fold in the live active timer so folder totals tick up in real time.
+  if (activeTimer) {
+    const note = notes[activeTimer.noteId];
+    if (note && note.folderId && !note.deletedAt) {
+      folderTimeMs[note.folderId] =
+        (folderTimeMs[note.folderId] || 0) + timerElapsed(activeTimer);
+    }
+  }
 }
 
 // ---- Print a single note ----
@@ -1786,6 +2188,8 @@ document.addEventListener("keydown", (event) => {
     finishFind();
   } else if (!ui.historyPanel.hidden) {
     ui.historyPanel.hidden = true;
+  } else if (!ui.timerPanel.hidden) {
+    ui.timerPanel.hidden = true;
   } else if (!ui.editorView.hidden) {
     ui.back.click();
   } else if (!ui.settingsView.hidden) {
@@ -1882,6 +2286,22 @@ ui.historyBtn.addEventListener("click", () => {
   else ui.historyPanel.hidden = true;
 });
 ui.historyClose.addEventListener("click", () => (ui.historyPanel.hidden = true));
+
+// Time tracker.
+ui.timerBtn.addEventListener("click", () => {
+  if (ui.timerPanel.hidden) openTimer();
+  else ui.timerPanel.hidden = true;
+});
+ui.timerClose.addEventListener("click", () => (ui.timerPanel.hidden = true));
+ui.timerChip.addEventListener("click", () => {
+  // Chip may reflect a timer on another note; jump there, else open the panel.
+  if (activeTimer && activeTimer.noteId !== currentId) openEditor(activeTimer.noteId);
+  else openTimer();
+});
+ui.timerStart.addEventListener("click", startTimer);
+ui.timerPause.addEventListener("click", pauseTimer);
+ui.timerSave.addEventListener("click", saveTimerSession);
+ui.timerReset.addEventListener("click", resetTimer);
 
 // Wiki-links and backlinks in the preview.
 ui.preview.addEventListener("click", (event) => {
@@ -2008,6 +2428,22 @@ browser.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// Keep the timer coherent if another sidebar window starts/stops one, or if a
+// note's sessions change elsewhere.
+browser.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== "local") return;
+  if ("timer" in changes) {
+    activeTimer = changes.timer.newValue || null;
+    ensureTick();
+    if (!ui.timerPanel.hidden) renderTimer();
+    else renderTimerChip();
+  }
+  if (currentId && `time:${currentId}` in changes) {
+    timeEntries = changes[`time:${currentId}`].newValue || [];
+    if (!ui.timerPanel.hidden) renderTimer();
+  }
+});
+
 onExternalChange(async () => {
   notes = await loadNotes();
   folders = await loadFolders();
@@ -2054,6 +2490,16 @@ onExternalChange(async () => {
   if (sitePermission) startSiteTracking();
   renderStorageBadge();
   applyEditorPrefs();
+  // Resume any timer that was left running when the sidebar last closed, and
+  // seed folder (project) totals.
+  activeTimer = await loadActiveTimer();
+  if (activeTimer && !notes[activeTimer.noteId]) {
+    activeTimer = null; // its note was deleted while the sidebar was closed
+    await saveActiveTimer(null);
+  }
+  await refreshFolderTimes();
+  ensureTick();
+  renderTimerChip();
   openList();
   // Purge notes that have sat in the trash longer than 30 days.
   const cutoff = Date.now() - TRASH_TTL_MS;

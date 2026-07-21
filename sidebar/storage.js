@@ -10,6 +10,14 @@ const PREFIX = "note:";
 const FOLDER_PREFIX = "folder:";
 const HISTORY_PREFIX = "history:";
 const HISTORY_LIMIT = 50;
+// Time-tracking entries live under "time:<id>", one array per note. Like
+// history, they stay out of the "note:" namespace so the sync engine never
+// mirrors them — time logs are local-only and free of the sync quota — but
+// they ARE included in JSON export/import, since billable hours are data the
+// user must be able to back up. The single "timer" key holds the one active
+// (running or paused) timer so it survives the sidebar closing.
+const TIME_PREFIX = "time:";
+const TIMER_KEY = "timer";
 
 export function newNote() {
   const now = Date.now();
@@ -92,7 +100,53 @@ export async function saveNote(note) {
 }
 
 export async function deleteNote(id) {
-  await browser.storage.local.remove([PREFIX + id, HISTORY_PREFIX + id]);
+  await browser.storage.local.remove([
+    PREFIX + id,
+    HISTORY_PREFIX + id,
+    TIME_PREFIX + id,
+  ]);
+}
+
+// ---- Time tracking (local-only, but exported for backup) ----
+
+export async function loadTimeEntries(id) {
+  const key = TIME_PREFIX + id;
+  const got = await browser.storage.local.get(key);
+  return got[key] || [];
+}
+
+export async function saveTimeEntries(id, entries) {
+  const key = TIME_PREFIX + id;
+  if (entries && entries.length) {
+    await browser.storage.local.set({ [key]: entries });
+  } else {
+    await browser.storage.local.remove(key);
+  }
+}
+
+// Every note's entries at once, as { noteId: entries[] } — used for folder
+// (project) totals and for JSON export.
+export async function loadAllTimeEntries() {
+  const everything = await browser.storage.local.get(null);
+  const out = {};
+  for (const [key, value] of Object.entries(everything)) {
+    if (key.startsWith(TIME_PREFIX)) out[key.slice(TIME_PREFIX.length)] = value;
+  }
+  return out;
+}
+
+// The one active timer, or null. Shape:
+//   { noteId, accumulatedMs, runningSince }
+// runningSince is a Date.now() timestamp while running, or null while paused;
+// elapsed = accumulatedMs + (runningSince ? Date.now() - runningSince : 0).
+export async function loadActiveTimer() {
+  const got = await browser.storage.local.get(TIMER_KEY);
+  return got[TIMER_KEY] || null;
+}
+
+export async function saveActiveTimer(timer) {
+  if (timer) await browser.storage.local.set({ [TIMER_KEY]: timer });
+  else await browser.storage.local.remove(TIMER_KEY);
 }
 
 // ---- Version history (local-only) ----
