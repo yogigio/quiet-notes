@@ -368,6 +368,18 @@ install warning nor grants page access, so the zero-collection story holds.
   synced (which would risk double-firing across devices) — but **included in
   JSON export/import**. Purging a note drops its reminder.
 
+### v0.11.2 — list batching (shipped)
+
+The note list renders in batches of `LIST_BATCH` (50) rather than all at once,
+so a large collection stays fast. The first 50 cards render immediately; a
+"Showing N of M — load more" row appends the next batch, either on click or
+automatically when `#list-view` is scrolled near its bottom (a plain scroll
+handler, not `IntersectionObserver` — one batch per bottom-reach). The cap
+(`listLimit`) resets to one batch and scrolls to the top whenever the folder
+or search query changes. Numbered pages were rejected: the list is
+recency-sorted and search-driven, so "scroll or search" fits better than
+paging through pages of notes.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

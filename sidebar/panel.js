@@ -157,6 +157,12 @@ const ui = {
 
 let notes = {};
 let folders = {};
+// The list renders in batches: the first LIST_BATCH cards, then more are
+// appended as the user scrolls near the bottom (see renderList). listLimit is
+// the current cap; lastListKey resets it to a fresh batch whenever the list
+// context (folder or search) changes.
+let listLimit = 0;
+let lastListKey = null;
 let currentFolderId = null; // null = Home
 let editingFolderId = null; // folder being edited in the sheet (null = new)
 let draftIcon = "📁";
@@ -198,6 +204,7 @@ let cdResetArmed = false;
 
 const SAVE_DELAY_MS = 400;
 const SYNC_QUOTA_BYTES = 102400; // Firefox storage.sync total quota
+const LIST_BATCH = 50; // cards rendered per batch in the note list
 const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FONT_SIZES = { s: "13px", m: "14.5px", l: "16.5px" };
 
@@ -466,27 +473,50 @@ function renderFolderSection() {
 function renderList() {
   renderFolderSection();
   const query = ui.search.value.trim().toLowerCase();
+  // Reset to a fresh batch whenever the folder or search changes.
+  const key = (currentFolderId || "") + "|" + query;
+  if (key !== lastListKey) {
+    lastListKey = key;
+    listLimit = LIST_BATCH;
+    ui.listView.scrollTop = 0;
+  }
+
   const visible = sortedNotes().filter(
     (note) =>
       (currentFolderId ? note.folderId === currentFolderId : true) &&
       matchesQuery(note, query)
   );
 
-  ui.noteList.textContent = "";
+  // Display order: any "on this site" notes first (with labels), then the rest.
   const siteGroup =
     !currentFolderId && sitePermission && currentHost
       ? visible.filter((note) => note.site === currentHost)
       : [];
+  const seq = [];
   if (siteGroup.length) {
-    appendGroupLabel(`On ${currentHost}`);
-    for (const note of siteGroup) appendCard(note);
-    appendGroupLabel("All notes");
+    seq.push({ label: `On ${currentHost}` });
+    for (const note of siteGroup) seq.push({ note });
+    seq.push({ label: "All notes" });
     for (const note of visible) {
-      if (note.site !== currentHost) appendCard(note);
+      if (note.site !== currentHost) seq.push({ note });
     }
   } else {
-    for (const note of visible) appendCard(note);
+    for (const note of visible) seq.push({ note });
   }
+
+  // Render up to listLimit cards; labels don't count toward the cap.
+  ui.noteList.textContent = "";
+  let shown = 0;
+  for (const item of seq) {
+    if (shown >= listLimit) break;
+    if (item.label) appendGroupLabel(item.label);
+    else {
+      appendCard(item.note);
+      shown++;
+    }
+  }
+  const totalCards = seq.reduce((n, item) => n + (item.note ? 1 : 0), 0);
+  if (shown < totalCards) appendLoadMore(shown, totalCards);
 
   if (!visible.length && currentFolderId) {
     const p = document.createElement("p");
@@ -495,6 +525,29 @@ function renderList() {
     ui.noteList.append(p);
   }
   ui.emptyHint.hidden = sortedNotes().length > 0;
+}
+
+// A footer row shown when more cards remain. Clicking it loads the next batch;
+// scrolling near the bottom does the same (see the #list-view scroll handler).
+function appendLoadMore(shown, total) {
+  const li = document.createElement("li");
+  li.className = "load-more";
+  li.textContent = `Showing ${shown} of ${total} — load more`;
+  li.addEventListener("click", loadMore);
+  ui.noteList.append(li);
+}
+
+function loadMore() {
+  listLimit += LIST_BATCH;
+  renderList();
+}
+
+// Auto-load the next batch when the list is scrolled near its bottom.
+function maybeLoadMore() {
+  if (ui.listView.hidden) return;
+  if (!ui.noteList.querySelector(".load-more")) return;
+  const el = ui.listView;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 300) loadMore();
 }
 
 function appendGroupLabel(text) {
@@ -2504,6 +2557,8 @@ ui.noteList.addEventListener("click", (event) => {
 });
 
 ui.search.addEventListener("input", renderList);
+// Infinite scroll: load the next batch as the list nears its bottom.
+ui.listView.addEventListener("scroll", maybeLoadMore, { passive: true });
 
 ui.back.addEventListener("click", async () => {
   await flushSave();

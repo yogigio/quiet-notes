@@ -285,6 +285,18 @@ svg {
   letter-spacing: 0.06em;
 }
 
+#note-list li.load-more,
+#note-list li.load-more:hover {
+  padding: 9px 10px;
+  background: none;
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+#note-list li.load-more:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ---- Folders ---- */
 
 #folder-section { margin-bottom: 8px; }
