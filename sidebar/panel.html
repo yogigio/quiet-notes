@@ -179,11 +179,13 @@
             <button type="button" data-min="15">15m</button>
             <button type="button" data-min="25">25m</button>
             <button type="button" data-min="45">45m</button>
-            <label class="cd-custom-wrap">
-              <input id="cd-custom" type="number" min="1" max="600" step="1"
-                     inputmode="numeric" aria-label="Custom minutes"> min
-            </label>
           </div>
+          <label class="cd-custom-wrap">
+            <span>Custom</span>
+            <input id="cd-custom" type="number" min="1" max="600" step="1"
+                   inputmode="numeric" aria-label="Custom minutes">
+            <span>min</span>
+          </label>
           <label class="check-row slim" id="cd-pomodoro-row">
             <input type="checkbox" id="cd-pomodoro">
             <span>Pomodoro — 25 min focus / 5 min break, auto-cycling</span>

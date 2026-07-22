@@ -871,15 +871,50 @@ body.mono #preview {
 
 .timer-notice {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: var(--radius-s);
   background: var(--accent-soft);
   font-size: 0.88em;
 }
-.timer-notice span { flex: 1; min-width: 0; }
+.timer-notice-head { color: var(--text); font-weight: 500; }
+.timer-other-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 6px;
+  background: var(--surface);
+  text-align: left;
+}
+.timer-other-row:hover { background: var(--hover); }
+.to-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.5;
+  flex: none;
+}
+.to-dot.running { background: var(--accent); opacity: 1; }
+.to-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+.to-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
 
 #timer-display {
   text-align: center;
@@ -1012,15 +1047,16 @@ body.mono #preview {
   gap: 6px;
 }
 .cd-custom-wrap {
-  display: inline-flex;
+  display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   color: var(--text-dim);
   font-size: 0.85em;
 }
 #cd-custom {
-  width: 3.4em;
-  padding: 5px 6px;
+  width: 4.5em;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   background: var(--surface);

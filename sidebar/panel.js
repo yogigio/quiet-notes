@@ -1968,24 +1968,35 @@ function renderTimer() {
   const cur = timerFor(currentId);
   const others = currentId ? otherTimers(currentId) : [];
 
-  // Banner listing timers active on other notes, each with a jump link.
+  // Banner listing timers active on other notes — a header plus one row per
+  // note (title, state, elapsed), stacked vertically so long titles never
+  // overflow. Each row jumps to that note.
   ui.timerElsewhere.hidden = others.length === 0;
   if (others.length) {
     ui.timerElsewhere.textContent = "";
-    const label = document.createElement("span");
-    label.textContent =
+    const head = document.createElement("div");
+    head.className = "timer-notice-head";
+    head.textContent =
       others.length === 1
-        ? `${isRunning(others[0][1]) ? "Running" : "Paused"} on "${titleFor(others[0][0])}"`
+        ? `${isRunning(others[0][1]) ? "Running" : "Paused"} on another note`
         : `${others.length} timers on other notes`;
-    ui.timerElsewhere.append(label);
-    // One jump link per other note (capped so the banner stays compact).
-    others.slice(0, 3).forEach(([oid, t]) => {
-      const go = document.createElement("button");
-      go.className = "link-btn";
-      go.textContent = others.length === 1 ? "Go to it" : `${titleFor(oid)} · ${formatClock(timerElapsed(t))}`;
-      go.addEventListener("click", () => openEditor(oid));
-      ui.timerElsewhere.append(go);
-    });
+    ui.timerElsewhere.append(head);
+    for (const [oid, t] of others) {
+      const row = document.createElement("button");
+      row.className = "timer-other-row";
+      row.title = `Go to “${titleFor(oid)}”`;
+      const dot = document.createElement("span");
+      dot.className = "to-dot" + (isRunning(t) ? " running" : "");
+      const name = document.createElement("span");
+      name.className = "to-name";
+      name.textContent = titleFor(oid);
+      const time = document.createElement("span");
+      time.className = "to-time";
+      time.textContent = formatClock(timerElapsed(t));
+      row.append(dot, name, time);
+      row.addEventListener("click", () => openEditor(oid));
+      ui.timerElsewhere.append(row);
+    }
   }
 
   ui.timerDisplay.textContent = formatClock(timerElapsed(cur));
