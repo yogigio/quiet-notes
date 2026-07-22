@@ -435,6 +435,21 @@ its folder:
   `pinnedOnHome(note) = homePinned || (unfiled && pinned)`. The flag rides on
   the note record (additive, syncs like any note field).
 
+### v0.13.2 — explicit folder-pin item, editor open/find fixes (shipped)
+
+- The ⋯ menu gained an explicit **"Pin to top of folder"** item mirroring the
+  star, so the folder-pin is as discoverable as "Pin to Home" (they share one
+  `togglePin()`).
+- **Open a note at its top.** `openEditor` resets `editor.scrollTop`/`preview
+  .scrollTop` to 0 and drops the caret at the start after `setMode`, because
+  focusing the textarea otherwise leaves the caret at the end and scrolls to
+  the bottom.
+- **No more jumping while editing with Find open.** `runFind(scrollToMatch)`
+  now skips the scroll-to-first-match when the change came from editing the
+  note (the editor's `input` handler passes `false`); only typing in the find
+  box or pressing next/prev scrolls. Previously every keystroke re-ran
+  `gotoMatch(0)`, yanking the view to match #1.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

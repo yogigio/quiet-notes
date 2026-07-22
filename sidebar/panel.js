@@ -1039,6 +1039,12 @@ async function openEditor(id) {
   renderCounts();
   renderTimerChip();
   setMode(initialModeFor(note));
+  // Open showing the top of the note — focusing the textarea otherwise leaves
+  // the caret at the end and scrolls to the bottom.
+  if (mode === "write") ui.editor.setSelectionRange(0, 0);
+  ui.editor.scrollTop = 0;
+  ui.preview.scrollTop = 0;
+  updateScrollNav();
 }
 
 async function createNote(template) {
@@ -1818,8 +1824,12 @@ function finishFind() {
   if (start != null) ui.editor.setSelectionRange(start, start + len);
 }
 
-function runFind() {
+// scrollToMatch: jump the view to the first match (when typing in the find
+// box). Editing the note itself re-highlights in place with scrollToMatch
+// false, so the view never yanks away from the caret.
+function runFind(scrollToMatch = true) {
   const term = ui.findInput.value;
+  const prevIndex = findIndex;
   findMatches = [];
   findIndex = -1;
   if (term) {
@@ -1832,9 +1842,16 @@ function runFind() {
       from = at + needle.length;
     }
   }
-  if (findMatches.length) {
+  if (!findMatches.length) {
+    renderFindHighlight();
+    updateFindCount();
+    return;
+  }
+  if (scrollToMatch) {
     gotoMatch(0);
   } else {
+    // Repaint highlights at their new positions but leave the scroll alone.
+    findIndex = Math.min(Math.max(prevIndex, 0), findMatches.length - 1);
     renderFindHighlight();
     updateFindCount();
   }
@@ -3014,7 +3031,7 @@ ui.modePreview.addEventListener("click", () => {
 ui.editor.addEventListener("input", () => {
   renderCounts();
   scheduleSave();
-  if (!ui.findBar.hidden) runFind();
+  if (!ui.findBar.hidden) runFind(false);
   updateScrollNav();
 });
 ui.editor.addEventListener("scroll", () => {
@@ -3119,7 +3136,7 @@ ui.findToggle.addEventListener("click", () => {
   if (ui.findBar.hidden) openFind();
   else finishFind();
 });
-ui.findInput.addEventListener("input", runFind);
+ui.findInput.addEventListener("input", () => runFind());
 ui.findInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
