@@ -11,6 +11,9 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
       <input id="search" type="search" placeholder="Search, or #tag" autocomplete="off">
     </div>
+    <button id="select-toggle" class="icon-btn" title="Select notes" aria-label="Select notes">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2.5"/><path d="M5.2 8.2l2 2 3.6-4"/></svg>
+    </button>
     <button id="new-note" class="icon-btn primary" title="New note" aria-label="New note">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
     </button>
@@ -264,6 +267,12 @@
           <input type="checkbox" id="mono-toggle">
           <span>Monospace font</span>
         </label>
+        <label class="check-row slim">
+          <input type="checkbox" id="home-show-all">
+          <span>Show filed notes on Home too</span>
+        </label>
+        <p class="hint">Off (default): Home lists only unfiled notes; filed
+          notes live in their folders. Search always finds every note.</p>
       </section>
       <section class="setting">
         <strong>Time tracking</strong>
@@ -302,7 +311,7 @@
   </main>
 
   <div id="undo-toast" hidden>
-    <span>Note moved to trash</span>
+    <span id="undo-text">Note moved to trash</span>
     <button id="undo-btn">Undo</button>
   </div>
 
@@ -355,6 +364,17 @@
       </div>
     </div>
   </div>
+
+  <footer id="selection-bar" hidden>
+    <button id="sel-cancel" class="icon-btn" title="Done" aria-label="Done selecting">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+    <span id="sel-count">0 selected</span>
+    <button id="sel-all">All</button>
+    <span class="spacer"></span>
+    <button id="sel-move">Move</button>
+    <button id="sel-delete" class="danger-btn">Delete</button>
+  </footer>
 
   <footer id="bottombar">
     <button id="export">Export</button>

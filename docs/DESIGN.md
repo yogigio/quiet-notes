@@ -380,6 +380,25 @@ or search query changes. Numbered pages were rejected: the list is
 recency-sorted and search-driven, so "scroll or search" fits better than
 paging through pages of notes.
 
+### v0.12 — filing model + bulk actions (shipped)
+
+- **Home hides filed notes by default.** Following the "projects" model the
+  folders feature is based on, filing a note tucks it into its folder rather
+  than leaving it on Home. Home's browse list (no search) shows only unfiled
+  notes plus the Folders section; **search always spans every note** (filed
+  included), so nothing becomes unreachable, and an empty Home shows an "All
+  notes are filed…" hint. `settings.homeShowsAll` ("Show filed notes on Home
+  too") restores the old all-notes browse for those who prefer it. The filter
+  lives in `renderList`; the note record is unchanged.
+- **Bulk select / move / delete.** A Select button in the top bar enters a
+  selection mode: each card gets a checkbox, the bottom bar is replaced by a
+  selection bar (count, Select all/None, Move, Delete), and tapping a card
+  toggles it instead of opening it. **Move** reuses the folder picker (incl.
+  "New folder…") for the whole set; **Delete** is a two-step confirm that
+  soft-deletes all selected with a single multi-note Undo. Selection state is
+  a `Set` of ids; the trash Undo now restores a list (`lastTrashedIds`), which
+  the single-note delete also uses. Esc or the ✕ exits selection.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

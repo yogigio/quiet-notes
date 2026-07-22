@@ -1623,3 +1623,61 @@ body.mono #preview {
 
 .badge.synced { color: var(--ok); }
 .badge.synced::before { background: var(--ok); }
+
+/* ---- Bulk selection ---- */
+
+#select-toggle.active { color: var(--accent); background: var(--accent-soft); }
+body.selecting #new-note { display: none; } /* only bulk actions during select */
+
+#note-list li.selectable {
+  position: relative;
+  padding-left: 36px;
+}
+.sel-box {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sel-box svg { width: 12px; height: 12px; stroke-width: 2.2; color: var(--on-accent); opacity: 0; }
+#note-list li.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+#note-list li.selected .sel-box { background: var(--accent); border-color: var(--accent); }
+#note-list li.selected .sel-box svg { opacity: 1; }
+
+#selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+#sel-count { font-size: 0.88em; font-weight: 500; }
+#selection-bar > button:not(.icon-btn) {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.9em;
+  transition: background 0.15s, filter 0.15s;
+}
+#selection-bar > button:not(.icon-btn):hover { background: var(--hover); }
+#selection-bar > button:disabled { opacity: 0.45; pointer-events: none; }
+#selection-bar .danger-btn {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  font-weight: 600;
+}
+#selection-bar .danger-btn:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); }

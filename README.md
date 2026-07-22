@@ -31,7 +31,11 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - Adjustable note text size, monospace option, and a default view mode
   (a note reopens how you left it — Write or Preview)
 - **Folders**: organize notes into color- and emoji-tagged folders you
-  navigate into (like Claude/ChatGPT projects); tags stay cross-cutting
+  navigate into (like Claude/ChatGPT projects); tags stay cross-cutting.
+  Filing a note tucks it into its folder — Home lists only unfiled notes
+  (search still finds everything). A setting brings filed notes back to Home
+- **Bulk actions**: a Select button turns the list into checkboxes to move
+  or trash many notes at once (with a single Undo)
 - **Time tracking**: a per-note stopwatch (start / pause / save / reset)
   that keeps counting in the background — close the sidebar and it resumes.
   Saved sessions roll up into a per-note total (with words/hour) and a

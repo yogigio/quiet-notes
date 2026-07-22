@@ -117,13 +117,22 @@ const ui = {
   defaultView: $("default-view"),
   fontSize: $("font-size"),
   monoToggle: $("mono-toggle"),
+  homeShowAll: $("home-show-all"),
   timerMode: $("timer-mode"),
   timerModeHint: $("timer-mode-hint"),
   timerSound: $("timer-sound"),
   trashList: $("trash-list"),
   emptyTrash: $("empty-trash"),
   undoToast: $("undo-toast"),
+  undoText: $("undo-text"),
   undoBtn: $("undo-btn"),
+  selectToggle: $("select-toggle"),
+  selectionBar: $("selection-bar"),
+  selCancel: $("sel-cancel"),
+  selCount: $("sel-count"),
+  selAll: $("sel-all"),
+  selMove: $("sel-move"),
+  selDelete: $("sel-delete"),
   menuFolder: $("menu-folder"),
   menuReminder: $("menu-reminder"),
   reminderSheet: $("reminder-sheet"),
@@ -153,6 +162,7 @@ const ui = {
   importFile: $("import-file"),
   storageNote: $("storage-note"),
   settings: $("settings"),
+  bottombar: $("bottombar"),
 };
 
 let notes = {};
@@ -173,8 +183,14 @@ let currentId = null;
 let mode = "write";
 let saveTimer = null;
 let deleteArmedUntil = 0;
-let lastTrashedId = null;
+let lastTrashedIds = []; // notes moved to trash by the last delete (for Undo)
 let toastTimer = null;
+// Bulk selection on the list. selectedIds holds the checked note ids;
+// currentVisibleIds is the filtered list currently on screen (for "select all").
+let selectionMode = false;
+let selectedIds = new Set();
+let currentVisibleIds = [];
+let selDeleteArmed = false;
 let sitePermission = false;
 let currentHost = "";
 let siteTrackingStarted = false;
@@ -481,11 +497,18 @@ function renderList() {
     ui.listView.scrollTop = 0;
   }
 
-  const visible = sortedNotes().filter(
-    (note) =>
-      (currentFolderId ? note.folderId === currentFolderId : true) &&
-      matchesQuery(note, query)
-  );
+  // On Home, filed notes are tucked away in their folders by default — the
+  // browse list shows only unfiled notes. Search still spans everything, so a
+  // filed note is always findable (and the "Show filed notes on Home" setting
+  // brings them all back).
+  const hideFiled = !currentFolderId && !query && !settings.homeShowsAll;
+  const visible = sortedNotes().filter((note) => {
+    if (currentFolderId) return note.folderId === currentFolderId && matchesQuery(note, query);
+    if (!matchesQuery(note, query)) return false;
+    if (hideFiled && note.folderId) return false;
+    return true;
+  });
+  currentVisibleIds = visible.map((note) => note.id); // for "select all"
 
   // Display order: any "on this site" notes first (with labels), then the rest.
   const siteGroup =
@@ -522,6 +545,12 @@ function renderList() {
     const p = document.createElement("p");
     p.className = "hint folder-empty";
     p.textContent = "No notes in this folder yet.";
+    ui.noteList.append(p);
+  } else if (!visible.length && hideFiled && sortedNotes().length) {
+    // Home is empty only because every note is filed — point the way.
+    const p = document.createElement("p");
+    p.className = "hint folder-empty";
+    p.textContent = "All notes are filed. Open a folder above, or search to find any note.";
     ui.noteList.append(p);
   }
   ui.emptyHint.hidden = sortedNotes().length > 0;
@@ -560,6 +589,15 @@ function appendGroupLabel(text) {
 function appendCard(note) {
   const item = document.createElement("li");
   item.dataset.id = note.id;
+
+  if (selectionMode) {
+    item.classList.add("selectable");
+    if (selectedIds.has(note.id)) item.classList.add("selected");
+    const box = document.createElement("span");
+    box.className = "sel-box";
+    box.append(svgIcon("M3.5 8.2l2.7 2.7 6.3-6.6"));
+    item.append(box); // absolutely positioned, so order doesn't matter
+  }
 
   const title = document.createElement("span");
   title.className = "note-title";
@@ -629,6 +667,87 @@ function appendCard(note) {
 
   item.append(title, snippet, meta);
   ui.noteList.append(item);
+}
+
+// ---- Bulk selection ----
+
+function enterSelection() {
+  selectionMode = true;
+  selectedIds.clear();
+  document.body.classList.add("selecting");
+  ui.selectToggle.classList.add("active");
+  ui.bottombar.hidden = true;
+  ui.selectionBar.hidden = false;
+  renderList();
+  updateSelectionBar();
+}
+
+function exitSelection() {
+  selectionMode = false;
+  selectedIds.clear();
+  selDeleteArmed = false;
+  document.body.classList.remove("selecting");
+  ui.selectToggle.classList.remove("active");
+  ui.selectionBar.hidden = true;
+  ui.bottombar.hidden = false;
+  renderList();
+}
+
+function toggleSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  const li = ui.noteList.querySelector(`li[data-id="${CSS.escape(id)}"]`);
+  if (li) li.classList.toggle("selected", selectedIds.has(id));
+  selDeleteArmed = false;
+  ui.selDelete.textContent = "Delete";
+  updateSelectionBar();
+}
+
+function toggleSelectAll() {
+  const all =
+    currentVisibleIds.length > 0 && currentVisibleIds.every((id) => selectedIds.has(id));
+  if (all) selectedIds.clear();
+  else for (const id of currentVisibleIds) selectedIds.add(id);
+  renderList();
+  updateSelectionBar();
+}
+
+function updateSelectionBar() {
+  const n = selectedIds.size;
+  ui.selCount.textContent = `${n} selected`;
+  ui.selMove.disabled = n === 0;
+  ui.selDelete.disabled = n === 0;
+  const all =
+    currentVisibleIds.length > 0 && currentVisibleIds.every((id) => selectedIds.has(id));
+  ui.selAll.textContent = all ? "None" : "All";
+}
+
+function bulkMove() {
+  if (selectedIds.size) openFolderPicker(true);
+}
+
+async function bulkDelete() {
+  if (!selectedIds.size) return;
+  // Two-step confirm — deleting several notes at once deserves a beat.
+  if (!selDeleteArmed) {
+    selDeleteArmed = true;
+    ui.selDelete.textContent = `Delete ${selectedIds.size}?`;
+    setTimeout(() => {
+      selDeleteArmed = false;
+      ui.selDelete.textContent = "Delete";
+    }, 3000);
+    return;
+  }
+  const ids = [...selectedIds];
+  for (const id of ids) {
+    const note = notes[id];
+    if (!note) continue;
+    note.deletedAt = Date.now();
+    note.updatedAt = Date.now();
+    await saveNote(note);
+  }
+  exitSelection();
+  showUndoToast(ids);
 }
 
 // ---- Editor: modes ----
@@ -1103,11 +1222,13 @@ async function handleDelete() {
   note.updatedAt = Date.now();
   await saveNote(note);
   openList();
-  showUndoToast(id);
+  showUndoToast([id]);
 }
 
-function showUndoToast(id) {
-  lastTrashedId = id;
+function showUndoToast(ids) {
+  lastTrashedIds = ids;
+  ui.undoText.textContent =
+    ids.length === 1 ? "Note moved to trash" : `${ids.length} notes moved to trash`;
   ui.undoToast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (ui.undoToast.hidden = true), 6000);
@@ -1116,11 +1237,13 @@ function showUndoToast(id) {
 async function undoTrash() {
   ui.undoToast.hidden = true;
   clearTimeout(toastTimer);
-  const note = notes[lastTrashedId];
-  if (!note) return;
-  delete note.deletedAt;
-  note.updatedAt = Date.now();
-  await saveNote(note);
+  for (const id of lastTrashedIds) {
+    const note = notes[id];
+    if (!note) continue;
+    delete note.deletedAt;
+    note.updatedAt = Date.now();
+    await saveNote(note);
+  }
   renderList();
 }
 
@@ -1250,6 +1373,7 @@ function renderSettingsControls() {
   ui.defaultView.value = settings.defaultView || "remember";
   ui.fontSize.value = settings.fontSize || "m";
   ui.monoToggle.checked = Boolean(settings.mono);
+  ui.homeShowAll.checked = Boolean(settings.homeShowsAll);
   ui.timerMode.value = timerMode();
   renderTimerModeHint();
   ui.timerSound.checked = Boolean(settings.timerSound);
@@ -1267,6 +1391,7 @@ function openSettings() {
 // ---- Folder create / edit / move ----
 
 let pendingMoveNoteId = null;
+let pendingBulkMove = null; // note ids to file into a folder created mid-move
 let folderDeleteArmed = 0;
 
 function buildFolderControls() {
@@ -1323,6 +1448,7 @@ function openFolderEdit(id) {
 function closeFolderEdit() {
   ui.folderEdit.hidden = true;
   pendingMoveNoteId = null;
+  pendingBulkMove = null;
 }
 
 async function saveFolderFromSheet() {
@@ -1341,13 +1467,26 @@ async function saveFolderFromSheet() {
   folder.updatedAt = Date.now();
   await saveFolder(folder);
 
-  // Created via "New folder…" in the move picker: file the note here.
+  // Created via "New folder…" in the move picker: file the note(s) here.
   if (isNew && pendingMoveNoteId && notes[pendingMoveNoteId]) {
     const note = notes[pendingMoveNoteId];
     note.folderId = folder.id;
     note.updatedAt = Date.now();
     await saveNote(note);
     refreshFolderMenuItem();
+  }
+  if (isNew && pendingBulkMove && pendingBulkMove.length) {
+    for (const id of pendingBulkMove) {
+      const note = notes[id];
+      if (!note) continue;
+      note.folderId = folder.id;
+      note.updatedAt = Date.now();
+      await saveNote(note);
+    }
+    pendingBulkMove = null;
+    closeFolderEdit();
+    exitSelection();
+    return;
   }
   closeFolderEdit();
   renderList();
@@ -1384,15 +1523,15 @@ function refreshFolderMenuItem() {
     : "Move to folder…";
 }
 
-function openFolderPicker() {
+function openFolderPicker(bulk = false) {
   closeMenus();
-  const note = notes[currentId];
-  if (!note) return;
+  const note = bulk ? null : notes[currentId];
+  if (!bulk && !note) return;
   ui.folderPickerList.textContent = "";
 
   const makeRow = (label, emoji, folderId) => {
     const b = document.createElement("button");
-    if ((note.folderId || null) === folderId) b.classList.add("sel");
+    if (!bulk && (note.folderId || null) === folderId) b.classList.add("sel");
     const em = document.createElement("span");
     em.className = "pk-emoji";
     em.textContent = emoji;
@@ -1400,7 +1539,9 @@ function openFolderPicker() {
     nm.className = "pk-name";
     nm.textContent = label;
     b.append(em, nm);
-    b.addEventListener("click", () => moveNoteToFolder(folderId));
+    b.addEventListener("click", () =>
+      bulk ? moveSelectedToFolder(folderId) : moveNoteToFolder(folderId)
+    );
     return b;
   };
 
@@ -1420,7 +1561,8 @@ function openFolderPicker() {
   nf.append(em, nm);
   nf.addEventListener("click", () => {
     closeFolderPicker();
-    pendingMoveNoteId = currentId;
+    if (bulk) pendingBulkMove = [...selectedIds];
+    else pendingMoveNoteId = currentId;
     openFolderEdit(null);
   });
   ui.folderPickerList.append(nf);
@@ -1441,6 +1583,19 @@ async function moveNoteToFolder(folderId) {
   await saveNote(note);
   refreshFolderMenuItem();
   closeFolderPicker();
+}
+
+async function moveSelectedToFolder(folderId) {
+  for (const id of selectedIds) {
+    const note = notes[id];
+    if (!note) continue;
+    if (folderId) note.folderId = folderId;
+    else delete note.folderId;
+    note.updatedAt = Date.now();
+    await saveNote(note);
+  }
+  closeFolderPicker();
+  exitSelection();
 }
 
 // ---- Export / import ----
@@ -2557,15 +2712,28 @@ document.addEventListener("click", (event) => {
 });
 
 ui.noteList.addEventListener("click", (event) => {
+  const item = event.target.closest("li");
+  if (selectionMode) {
+    if (item && item.dataset.id) toggleSelect(item.dataset.id);
+    return;
+  }
   const chip = event.target.closest(".tag-chip");
   if (chip) {
     ui.search.value = chip.dataset.site || `#${chip.dataset.tag}`;
     renderList();
     return;
   }
-  const item = event.target.closest("li");
   if (item && item.dataset.id) openEditor(item.dataset.id);
 });
+
+// Bulk selection.
+ui.selectToggle.addEventListener("click", () =>
+  selectionMode ? exitSelection() : enterSelection()
+);
+ui.selCancel.addEventListener("click", exitSelection);
+ui.selAll.addEventListener("click", toggleSelectAll);
+ui.selMove.addEventListener("click", bulkMove);
+ui.selDelete.addEventListener("click", bulkDelete);
 
 ui.search.addEventListener("input", renderList);
 // Infinite scroll: load the next batch as the list nears its bottom.
@@ -2642,6 +2810,8 @@ document.addEventListener("keydown", (event) => {
     ui.historyPanel.hidden = true;
   } else if (!ui.timerPanel.hidden) {
     ui.timerPanel.hidden = true;
+  } else if (selectionMode) {
+    exitSelection();
   } else if (!ui.editorView.hidden) {
     ui.back.click();
   } else if (!ui.settingsView.hidden) {
@@ -2872,6 +3042,11 @@ ui.fontSize.addEventListener("change", async () => {
 ui.monoToggle.addEventListener("change", async () => {
   settings.mono = ui.monoToggle.checked;
   applyEditorPrefs();
+  await saveSettings(settings);
+});
+
+ui.homeShowAll.addEventListener("change", async () => {
+  settings.homeShowsAll = ui.homeShowAll.checked;
   await saveSettings(settings);
 });
 
