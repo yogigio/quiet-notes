@@ -128,14 +128,25 @@ async function syncCountdownAlarm() {
   }
 }
 
+// A note's reminders are an array of { id, at }. Tolerate the legacy single
+// { at } object so alarms keep working before the panel migrates the data.
+function reminderArray(entry) {
+  if (!entry) return [];
+  if (Array.isArray(entry)) return entry.filter((r) => r && r.at);
+  if (entry.at) return [{ id: "legacy", at: entry.at }];
+  return [];
+}
+
 async function syncReminderAlarms() {
   const existing = await browser.alarms.getAll();
   for (const a of existing) {
     if (a.name.startsWith("reminder:")) await browser.alarms.clear(a.name);
   }
   const { reminders } = await local.get("reminders");
-  for (const [noteId, r] of Object.entries(reminders || {})) {
-    if (r && r.at) browser.alarms.create("reminder:" + noteId, { when: r.at });
+  for (const [noteId, entry] of Object.entries(reminders || {})) {
+    for (const r of reminderArray(entry)) {
+      browser.alarms.create(`reminder:${noteId}:${r.id}`, { when: r.at });
+    }
   }
 }
 
@@ -202,22 +213,29 @@ async function fireCountdown() {
   }
 }
 
-async function fireReminder(noteId) {
+async function fireReminder(noteId, rid) {
   const { reminders } = await local.get("reminders");
-  const r = reminders && reminders[noteId];
-  if (!r) return;
+  const arr = reminderArray(reminders && reminders[noteId]);
+  if (!arr.length) return;
   const title = await titleForNote(noteId);
-  notify("reminder:" + noteId, "Reminder", title || "A note is due.");
-  // One-shot: drop it after firing so it doesn't re-fire on restart.
+  notify(`reminder:${noteId}:${rid || ""}`, "Reminder", title || "A note is due.");
+  // One-shot: drop the fired reminder (or all, for a legacy alarm) so it
+  // doesn't re-fire on restart.
+  const remaining = rid ? arr.filter((r) => r.id !== rid) : [];
   const next = { ...reminders };
-  delete next[noteId];
+  if (remaining.length) next[noteId] = remaining;
+  else delete next[noteId];
   await local.set({ reminders: next });
 }
 
 browser.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === "countdown") await fireCountdown();
-  else if (alarm.name.startsWith("reminder:")) {
-    await fireReminder(alarm.name.slice("reminder:".length));
+  if (alarm.name === "countdown") return fireCountdown();
+  if (alarm.name.startsWith("reminder:")) {
+    const rest = alarm.name.slice("reminder:".length);
+    const sep = rest.indexOf(":");
+    const noteId = sep === -1 ? rest : rest.slice(0, sep);
+    const rid = sep === -1 ? null : rest.slice(sep + 1);
+    await fireReminder(noteId, rid);
   }
 });
 
@@ -232,7 +250,9 @@ browser.notifications.onClicked.addListener((id) => {
     // Not a user gesture on this platform; the flag below still applies.
   }
   if (id.startsWith("reminder:")) {
-    local.set({ openNote: id.slice("reminder:".length) });
+    const rest = id.slice("reminder:".length);
+    const noteId = rest.includes(":") ? rest.slice(0, rest.indexOf(":")) : rest;
+    local.set({ openNote: noteId });
   }
   browser.notifications.clear(id);
 });

@@ -31,6 +31,13 @@ const $ = (id) => document.getElementById(id);
 
 const ui = {
   topbar: $("topbar"),
+  menuToggle: $("menu-toggle"),
+  mainMenu: $("main-menu"),
+  mmAgenda: $("mm-agenda"),
+  mmFolder: $("mm-folder"),
+  mmSettings: $("mm-settings"),
+  mmExport: $("mm-export"),
+  mmImport: $("mm-import"),
   search: $("search"),
   newNote: $("new-note"),
   newMenu: $("new-menu"),
@@ -108,6 +115,9 @@ const ui = {
   saveState: $("save-state"),
   settingsView: $("settings-view"),
   settingsBack: $("settings-back"),
+  agendaView: $("agenda-view"),
+  agendaBack: $("agenda-back"),
+  agendaBody: $("agenda-body"),
   syncToggle: $("sync-toggle"),
   quota: $("quota"),
   quotaFill: $("quota-fill"),
@@ -137,9 +147,9 @@ const ui = {
   menuReminder: $("menu-reminder"),
   reminderSheet: $("reminder-sheet"),
   reminderFor: $("reminder-for"),
+  reminderList: $("reminder-list"),
   reminderAt: $("reminder-at"),
   reminderQuick: $("reminder-quick"),
-  reminderClear: $("reminder-clear"),
   reminderCancel: $("reminder-cancel"),
   reminderSave: $("reminder-save"),
   folderEdit: $("folder-edit"),
@@ -634,12 +644,14 @@ function appendCard(note) {
   const time = document.createElement("span");
   time.textContent = relativeTime(note.updatedAt);
   meta.append(time);
-  const reminder = reminders[note.id];
-  if (reminder) {
+  const noteReminders = reminders[note.id];
+  if (noteReminders && noteReminders.length) {
+    const soonest = noteReminders.reduce((a, b) => (a.at <= b.at ? a : b));
     const chip = document.createElement("span");
     chip.className = "reminder-chip";
-    chip.classList.toggle("overdue", reminder.at < Date.now());
-    chip.textContent = `⏰ ${formatReminder(reminder.at)}`;
+    chip.classList.toggle("overdue", soonest.at < Date.now());
+    const extra = noteReminders.length > 1 ? ` +${noteReminders.length - 1}` : "";
+    chip.textContent = `⏰ ${formatReminder(soonest.at)}${extra}`;
     meta.append(chip);
   }
   if (!currentFolderId && note.folderId && folders[note.folderId]) {
@@ -932,12 +944,14 @@ function showView(view) {
   ui.listView.hidden = view !== "list";
   ui.editorView.hidden = view !== "editor";
   ui.settingsView.hidden = view !== "settings";
+  ui.agendaView.hidden = view !== "agenda";
   closeMenus();
 }
 
 function closeMenus() {
   ui.newMenu.hidden = true;
   ui.moreMenu.hidden = true;
+  ui.mainMenu.hidden = true;
 }
 
 function openList() {
@@ -1672,13 +1686,18 @@ async function importFromFile(file) {
         await saveTimeEntries(noteId, merged);
       }
     }
-    // Merge reminders (keep the later time on a conflict).
+    // Merge reminders: union each note's reminders, de-duplicated by time so a
+    // re-import never doubles them. Handles both the array and legacy shapes.
     if (payload.reminders && typeof payload.reminders === "object") {
       const merged = { ...reminders };
-      for (const [noteId, r] of Object.entries(payload.reminders)) {
-        if (r && r.at && (!merged[noteId] || r.at > merged[noteId].at)) {
-          merged[noteId] = { at: r.at };
-        }
+      for (const [noteId, entry] of Object.entries(payload.reminders)) {
+        const incoming = normalizeReminderEntry(entry);
+        if (!incoming.length) continue;
+        const current = merged[noteId] || [];
+        const times = new Set(current.map((r) => r.at));
+        merged[noteId] = current.concat(
+          incoming.filter((r) => !times.has(r.at)).map((r) => ({ id: crypto.randomUUID(), at: r.at }))
+        );
       }
       reminders = merged;
       await saveReminders(reminders);
@@ -2467,7 +2486,31 @@ function switchTimerTab(tab) {
   else renderCountdown();
 }
 
-// ---- Reminders (per-note due dates) ----
+// ---- Reminders (per-note due dates; a note may have several) ----
+
+// Each note's reminders are an array of { id, at }. Normalize the legacy
+// single { at } object into that shape.
+function normalizeReminderEntry(entry) {
+  if (!entry) return [];
+  if (Array.isArray(entry)) return entry.filter((r) => r && r.at);
+  if (entry.at) return [{ id: crypto.randomUUID(), at: entry.at }];
+  return [];
+}
+
+function remindersFor(id) {
+  return (reminders[id] || []).slice().sort((a, b) => a.at - b.at);
+}
+
+// All reminders across notes, flattened and sorted — for the Agenda view.
+function allReminders() {
+  const out = [];
+  for (const [noteId, arr] of Object.entries(reminders)) {
+    const note = notes[noteId];
+    if (!note || note.deletedAt) continue;
+    for (const r of arr) out.push({ noteId, id: r.id, at: r.at });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
 
 // datetime-local expects "YYYY-MM-DDTHH:MM" in the user's local time.
 function toLocalInput(ts) {
@@ -2488,43 +2531,160 @@ function formatReminder(at) {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
+// Full datetime for the sheet's reminder list rows.
+function formatReminderFull(at) {
+  const d = new Date(at);
+  return d.toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function refreshReminderMenuItem() {
-  ui.menuReminder.textContent = reminders[currentId] ? "Change reminder…" : "Set reminder…";
+  const n = (reminders[currentId] || []).length;
+  ui.menuReminder.textContent = n ? `Reminders (${n})…` : "Set reminder…";
 }
 
 function openReminderSheet() {
   ui.moreMenu.hidden = true;
   if (!currentId) return;
-  const r = reminders[currentId];
   const note = notes[currentId];
   ui.reminderFor.textContent = note ? `“${titleOf(note)}”` : "";
-  ui.reminderAt.value = toLocalInput(r ? r.at : Date.now() + 3600000);
-  ui.reminderClear.hidden = !r;
+  ui.reminderAt.value = toLocalInput(Date.now() + 3600000);
+  renderReminderList();
   ui.reminderSheet.hidden = false;
   ui.reminderAt.focus();
+}
+
+function renderReminderList() {
+  ui.reminderList.textContent = "";
+  const arr = remindersFor(currentId);
+  if (!arr.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "No reminders yet.";
+    ui.reminderList.append(p);
+    return;
+  }
+  for (const r of arr) {
+    const row = document.createElement("div");
+    row.className = "reminder-row";
+    row.classList.toggle("overdue", r.at < Date.now());
+    const when = document.createElement("span");
+    when.className = "rr-when";
+    when.textContent = formatReminderFull(r.at);
+    const del = document.createElement("button");
+    del.className = "rr-del";
+    del.title = "Remove reminder";
+    del.textContent = "✕";
+    del.addEventListener("click", () => removeReminder(r.id));
+    row.append(when, del);
+    ui.reminderList.append(row);
+  }
 }
 
 function closeReminderSheet() {
   ui.reminderSheet.hidden = true;
 }
 
-async function saveReminder() {
+// "Add" appends a reminder and keeps the sheet open so several can be added.
+async function addReminder() {
   if (!currentId || !ui.reminderAt.value) return;
   const at = new Date(ui.reminderAt.value).getTime();
   if (Number.isNaN(at)) return;
-  reminders = { ...reminders, [currentId]: { at } };
+  const arr = (reminders[currentId] || []).concat({ id: crypto.randomUUID(), at });
+  reminders = { ...reminders, [currentId]: arr };
   await saveReminders(reminders);
   refreshReminderMenuItem();
-  closeReminderSheet();
+  renderReminderList();
+  ui.reminderAt.value = toLocalInput(at + 3600000); // ready for the next
 }
 
-async function clearReminder() {
+async function removeReminder(rid) {
+  const arr = (reminders[currentId] || []).filter((r) => r.id !== rid);
   const next = { ...reminders };
-  delete next[currentId];
+  if (arr.length) next[currentId] = arr;
+  else delete next[currentId];
   reminders = next;
   await saveReminders(reminders);
   refreshReminderMenuItem();
-  closeReminderSheet();
+  renderReminderList();
+}
+
+// ---- Agenda / Upcoming ----
+
+function openAgenda() {
+  closeMenus();
+  currentId = null;
+  showView("agenda");
+  renderAgenda();
+}
+
+// A compact "when" label for an agenda row (the group header carries the day,
+// but This week / Later span days, so include enough context).
+function agendaWhen(at) {
+  const d = new Date(at);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return time;
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  if (at < start.getTime() + 7 * 86400000)
+    return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+function renderAgenda() {
+  ui.agendaBody.textContent = "";
+  const items = allReminders();
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "hint agenda-empty";
+    p.textContent = "No reminders scheduled. Add one from a note’s ⋯ menu → Reminders.";
+    ui.agendaBody.append(p);
+    return;
+  }
+  const now = Date.now();
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const todayStart = start.getTime();
+  const tomorrowStart = todayStart + 86400000;
+  const dayAfter = tomorrowStart + 86400000;
+  const weekEnd = todayStart + 7 * 86400000;
+  const order = ["Overdue", "Today", "Tomorrow", "This week", "Later"];
+  const groups = { Overdue: [], Today: [], Tomorrow: [], "This week": [], Later: [] };
+  for (const it of items) {
+    if (it.at < now) groups.Overdue.push(it);
+    else if (it.at < tomorrowStart) groups.Today.push(it);
+    else if (it.at < dayAfter) groups.Tomorrow.push(it);
+    else if (it.at < weekEnd) groups["This week"].push(it);
+    else groups.Later.push(it);
+  }
+  for (const name of order) {
+    const list = groups[name];
+    if (!list.length) continue;
+    const head = document.createElement("div");
+    head.className = "agenda-head";
+    head.classList.toggle("overdue", name === "Overdue");
+    head.textContent = name;
+    ui.agendaBody.append(head);
+    for (const it of list) {
+      const row = document.createElement("button");
+      row.className = "agenda-row";
+      const when = document.createElement("span");
+      when.className = "ag-when";
+      when.textContent = agendaWhen(it.at);
+      const title = document.createElement("span");
+      title.className = "ag-title";
+      title.textContent = titleOf(notes[it.noteId]);
+      row.append(when, title);
+      row.addEventListener("click", () => openEditor(it.noteId));
+      ui.agendaBody.append(row);
+    }
+  }
 }
 
 // ---- Print a single note ----
@@ -2628,15 +2788,14 @@ ui.more.addEventListener("click", (event) => {
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
 });
 
-ui.menuFolder.addEventListener("click", openFolderPicker);
+ui.menuFolder.addEventListener("click", () => openFolderPicker());
 ui.menuReminder.addEventListener("click", openReminderSheet);
-ui.reminderSave.addEventListener("click", saveReminder);
-ui.reminderClear.addEventListener("click", clearReminder);
+ui.reminderSave.addEventListener("click", addReminder);
 ui.reminderCancel.addEventListener("click", closeReminderSheet);
 ui.reminderAt.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    saveReminder();
+    addReminder();
   }
 });
 ui.reminderQuick.addEventListener("click", (event) => {
@@ -2739,11 +2898,34 @@ ui.search.addEventListener("input", renderList);
 // Infinite scroll: load the next batch as the list nears its bottom.
 ui.listView.addEventListener("scroll", maybeLoadMore, { passive: true });
 
+// Hamburger menu (top row).
+ui.menuToggle.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = ui.mainMenu.hidden;
+  closeMenus();
+  ui.mainMenu.hidden = !open;
+});
+ui.mmAgenda.addEventListener("click", openAgenda);
+ui.mmFolder.addEventListener("click", () => {
+  closeMenus();
+  openFolderEdit(null);
+});
+ui.mmSettings.addEventListener("click", openSettings);
+ui.mmExport.addEventListener("click", () => {
+  closeMenus();
+  exportAll();
+});
+ui.mmImport.addEventListener("click", () => {
+  closeMenus();
+  ui.importFile.click();
+});
+
 ui.back.addEventListener("click", async () => {
   await flushSave();
   openList();
 });
 ui.settingsBack.addEventListener("click", openList);
+ui.agendaBack.addEventListener("click", openList);
 
 ui.modeWrite.addEventListener("click", () => {
   setMode("write");
@@ -2814,7 +2996,7 @@ document.addEventListener("keydown", (event) => {
     exitSelection();
   } else if (!ui.editorView.hidden) {
     ui.back.click();
-  } else if (!ui.settingsView.hidden) {
+  } else if (!ui.settingsView.hidden || !ui.agendaView.hidden) {
     openList();
   }
 });
@@ -3137,6 +3319,8 @@ browser.storage.onChanged.addListener(async (changes, area) => {
   if ("reminders" in changes) {
     reminders = changes.reminders.newValue || {};
     if (!ui.listView.hidden) renderList();
+    if (!ui.agendaView.hidden) renderAgenda();
+    if (!ui.reminderSheet.hidden) renderReminderList();
     if (currentId) refreshReminderMenuItem();
   }
   // A clicked reminder notification asks the panel to open a note.
@@ -3207,6 +3391,15 @@ onExternalChange(async () => {
   if (prunedTimers) await saveTimers(timers);
   // Countdown + reminders (both local-only, driven by the background).
   [countdown, reminders] = await Promise.all([loadCountdown(), loadReminders()]);
+  // Migrate any legacy single-object reminders to the { id, at }[] shape.
+  let remindersMigrated = false;
+  for (const [noteId, entry] of Object.entries(reminders)) {
+    if (!Array.isArray(entry)) {
+      reminders[noteId] = normalizeReminderEntry(entry);
+      remindersMigrated = true;
+    }
+  }
+  if (remindersMigrated) await saveReminders(reminders);
   await refreshFolderTimes();
   ensureTick();
   renderTimerChip();

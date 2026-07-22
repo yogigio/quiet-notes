@@ -7,6 +7,16 @@
 </head>
 <body>
   <header id="topbar">
+    <button id="menu-toggle" class="icon-btn" title="Menu" aria-label="Menu">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>
+    </button>
+    <div id="main-menu" class="menu" hidden>
+      <button id="mm-agenda">Upcoming reminders</button>
+      <button id="mm-folder">New folder…</button>
+      <button id="mm-settings">Settings</button>
+      <button id="mm-export">Export backup…</button>
+      <button id="mm-import">Import backup…</button>
+    </div>
     <div id="search-wrap">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="m10.2 10.2 3 3"/></svg>
       <input id="search" type="search" placeholder="Search, or #tag" autocomplete="off">
@@ -310,6 +320,17 @@
     </div>
   </main>
 
+  <main id="agenda-view" hidden>
+    <div id="agenda-bar">
+      <button id="agenda-back" class="icon-btn" title="Back to list (Esc)" aria-label="Back to list">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
+      </button>
+      <strong class="bar-title">Upcoming</strong>
+      <span class="spacer"></span>
+    </div>
+    <div id="agenda-body"></div>
+  </main>
+
   <div id="undo-toast" hidden>
     <span id="undo-text">Note moved to trash</span>
     <button id="undo-btn">Undo</button>
@@ -334,8 +355,10 @@
 
   <div id="reminder-sheet" class="sheet" hidden>
     <div class="sheet-card">
-      <strong class="sheet-title">Set reminder</strong>
+      <strong class="sheet-title">Reminders</strong>
       <p class="hint" id="reminder-for"></p>
+      <div id="reminder-list"></div>
+      <div class="field-label">Add a reminder</div>
       <input id="reminder-at" type="datetime-local" autocomplete="off">
       <div id="reminder-quick" class="reminder-quick">
         <button type="button" data-mins="60">In 1 hour</button>
@@ -346,10 +369,9 @@
       <p class="hint">Fires a desktop notification even if the sidebar is
         closed. Reminders stay on this device and never sync.</p>
       <div class="sheet-actions">
-        <button id="reminder-clear" class="danger-btn" hidden>Clear</button>
         <span class="spacer"></span>
-        <button id="reminder-cancel">Cancel</button>
-        <button id="reminder-save" class="primary-btn">Save</button>
+        <button id="reminder-cancel">Done</button>
+        <button id="reminder-save" class="primary-btn">Add</button>
       </div>
     </div>
   </div>

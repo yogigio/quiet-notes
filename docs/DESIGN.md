@@ -399,6 +399,25 @@ paging through pages of notes.
   a `Set` of ids; the trash Undo now restores a list (`lastTrashedIds`), which
   the single-note delete also uses. Esc or the ✕ exits selection.
 
+### v0.13 — agenda, multiple reminders & a top-row menu (shipped)
+
+- **Several reminders per note.** `reminders[noteId]` becomes an array of
+  `{ id, at }` (legacy single-object entries migrate on load). The ⋯ menu's
+  **Reminders…** sheet now lists a note's reminders with per-item remove and an
+  **Add** row (datetime + quick presets) that appends without closing, so you
+  can schedule multiple times per day. The background schedules one
+  `reminder:<noteId>:<rid>` alarm each and, on fire, removes just that one; the
+  list chip shows the soonest plus a `+n` count.
+- **Agenda / Upcoming view.** A new view (opened from the top-row menu)
+  aggregates every reminder chronologically, grouped **Overdue / Today /
+  Tomorrow / This week / Later**; each row opens its note. Chosen over a
+  month-grid calendar, which doesn't fit a ~320px sidebar or the minimal ethos.
+- **Hamburger menu in our own top row.** A ☰ button opens a dropdown with
+  Upcoming reminders, New folder…, Settings, Export/Import. Note: the visible
+  "Quiet Notes" bar above it is **Firefox's own sidebar header**, which
+  extensions cannot modify, add to, or resize — so the menu lives in our top
+  row (the search line), not on that title line.
+
 ### v1.0 — release
 
 - UI localization via `_locales` (English, Georgian, …)

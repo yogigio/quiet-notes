@@ -46,9 +46,11 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Countdown & Pomodoro**: the timer has a Countdown tab with presets and a
   Pomodoro mode (25/5, auto-cycling) that notifies you when time's up — even
   if the sidebar is closed
-- **Reminders**: give any note a due date (⋯ → Set reminder…); a desktop
-  notification fires at the set time and clicking it opens the note. Reminders
-  stay on this device and never sync
+- **Reminders & Agenda**: give a note one or several due dates (⋯ →
+  Reminders…); a desktop notification fires at each and clicking it opens the
+  note. The top-row ☰ menu's **Upcoming** view lists all reminders by day
+  (Overdue / Today / Tomorrow / This week / Later). Reminders stay on this
+  device and never sync
 - **Site notes** (optional): link a note to the site you're on and it
   surfaces on top of the list when you return. Off by default — enabling
   it requests the `tabs` permission at runtime (hostname only, revoked

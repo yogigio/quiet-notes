@@ -147,6 +147,10 @@ svg {
 
 .menu button:hover { background: var(--hover); }
 
+/* Hamburger menu opens from the left of the top row. */
+#main-menu { left: 8px; right: auto; }
+#menu-toggle.active { color: var(--accent); background: var(--accent-soft); }
+
 #search-wrap {
   position: relative;
   flex: 1;
@@ -1145,6 +1149,78 @@ body.mono #preview {
   font-size: 0.85em;
 }
 .reminder-quick button:hover { background: var(--hover); }
+
+/* Existing reminders inside the sheet */
+#reminder-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  font-size: 0.9em;
+}
+.reminder-row.overdue { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.rr-when { flex: 1; min-width: 0; font-variant-numeric: tabular-nums; }
+.reminder-row.overdue .rr-when { color: var(--danger); }
+.rr-del {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+.rr-del:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+
+/* ---- Agenda / Upcoming view ---- */
+
+#agenda-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#agenda-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 8px 5px;
+  border-bottom: 1px solid var(--border);
+}
+#agenda-body { flex: 1; overflow-y: auto; padding: 6px 8px 12px; }
+.agenda-empty { margin-top: 30%; text-align: center; }
+.agenda-head {
+  padding: 12px 4px 4px;
+  color: var(--text-dim);
+  font-size: 0.76em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.agenda-head.overdue { color: var(--danger); }
+.agenda-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 8px;
+  border-radius: var(--radius-s);
+  text-align: left;
+}
+.agenda-row:hover { background: var(--hover); }
+.ag-when {
+  flex: none;
+  min-width: 4.6em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+.ag-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
 
 /* ---- Preview (rendered Markdown) ---- */
 
