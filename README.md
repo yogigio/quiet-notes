@@ -33,7 +33,10 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
 - **Folders**: organize notes into color- and emoji-tagged folders you
   navigate into (like Claude/ChatGPT projects); tags stay cross-cutting.
   Filing a note tucks it into its folder — Home lists only unfiled notes
-  (search still finds everything). A setting brings filed notes back to Home
+  (search still finds everything). A setting brings filed notes back to Home.
+  **Pin** sends a note to the top of its list (the folder's top when filed);
+  **Pin to Home** (⋯ menu) also surfaces a filed note at the top of Home while
+  it stays in its folder
 - **Bulk actions**: a Select button turns the list into checkboxes to move
   or trash many notes at once (with a single Undo)
 - **Time tracking**: a per-note stopwatch (start / pause / save / reset)

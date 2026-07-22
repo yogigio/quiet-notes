@@ -39,8 +39,8 @@ end-to-end encryption — no third-party or first-party servers, ever.
 
   Optional fields added over time (all additive, so old exports import
   cleanly): `tags`, `lang`, `glossary`, `pinned`, `template`, `deletedAt`,
-  `site`, `folderId`. `format` in the export envelope is the migration
-  handle; the JSON export also carries a `folders` array.
+  `site`, `folderId`, `homePinned`. `format` in the export envelope is the
+  migration handle; the JSON export also carries a `folders` array.
 
   **Folder model:** `{ id, name, icon (emoji), color (palette key),
   createdAt, updatedAt }`. A note belongs to at most one folder via
@@ -417,6 +417,21 @@ paging through pages of notes.
   "Quiet Notes" bar above it is **Firefox's own sidebar header**, which
   extensions cannot modify, add to, or resize — so the menu lives in our top
   row (the search line), not on that title line.
+
+### v0.13.1 — pin to folder top / pin to Home (shipped)
+
+Two independent pin behaviors, so a filed note can be surfaced without leaving
+its folder:
+
+- **Pin to top of the list** — the existing star (`pinned`). Inside a folder it
+  pins the note to the folder's top; on Home (for unfiled notes) it pins to the
+  Home top. No change — it already covered the "pin to top of folder" case.
+- **Pin to Home** — a new per-note flag `homePinned` (⋯ menu, shown only for
+  filed notes). A home-pinned note appears on Home **at the top** *and* stays in
+  its folder (shown with its folder chip and a small home marker). `renderList`
+  keeps filed notes off Home unless `homePinned`, and sorts Home by
+  `pinnedOnHome(note) = homePinned || (unfiled && pinned)`. The flag rides on
+  the note record (additive, syncs like any note field).
 
 ### v1.0 — release
 

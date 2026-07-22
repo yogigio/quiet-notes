@@ -144,6 +144,7 @@ const ui = {
   selMove: $("sel-move"),
   selDelete: $("sel-delete"),
   menuFolder: $("menu-folder"),
+  menuHomepin: $("menu-homepin"),
   menuReminder: $("menu-reminder"),
   reminderSheet: $("reminder-sheet"),
   reminderFor: $("reminder-for"),
@@ -273,6 +274,7 @@ const ICON_TPL =
   "M5.5 5.5h7v7h-7z M3 10.5V4.5A1.5 1.5 0 0 1 4.5 3H10";
 const ICON_CHEVRON = "M6.5 3.5 11 8l-4.5 4.5";
 const ICON_BACK = "M10 3.5 5.5 8l4.5 4.5";
+const ICON_HOME = "M2.7 7.8 8 3.3l5.3 4.5M4.3 6.7v5.8h7.4V6.7";
 
 function svgIcon(pathData, filled) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -303,6 +305,13 @@ function relativeTime(timestamp) {
   const days = Math.round(hours / 24);
   if (days < 7) return `${days} d ago`;
   return new Date(timestamp).toLocaleDateString();
+}
+
+// Whether a note is pinned to the top of the Home list. An unfiled pinned note
+// pins itself there; a filed note pins to Home only via the explicit
+// "Pin to Home" flag (homePinned), which also keeps it in its folder.
+function pinnedOnHome(note) {
+  return Boolean(note.homePinned) || (!note.folderId && Boolean(note.pinned));
 }
 
 function sortedNotes() {
@@ -515,9 +524,20 @@ function renderList() {
   const visible = sortedNotes().filter((note) => {
     if (currentFolderId) return note.folderId === currentFolderId && matchesQuery(note, query);
     if (!matchesQuery(note, query)) return false;
-    if (hideFiled && note.folderId) return false;
+    // Filed notes are hidden from Home unless explicitly pinned to Home.
+    if (hideFiled && note.folderId && !note.homePinned) return false;
     return true;
   });
+  // On Home, float notes pinned to Home to the top (in addition to unfiled
+  // pinned ones). Inside a folder, sortedNotes already puts pinned notes first.
+  if (!currentFolderId) {
+    visible.sort((a, b) => {
+      const pa = pinnedOnHome(a) ? 1 : 0;
+      const pb = pinnedOnHome(b) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return b.updatedAt - a.updatedAt;
+    });
+  }
   currentVisibleIds = visible.map((note) => note.id); // for "select all"
 
   // Display order: any "on this site" notes first (with labels), then the rest.
@@ -628,6 +648,13 @@ function appendCard(note) {
     mark.className = "note-pin";
     mark.title = "Template";
     mark.append(svgIcon(ICON_TPL));
+    title.append(mark);
+  }
+  if (note.homePinned) {
+    const mark = document.createElement("span");
+    mark.className = "note-pin home-pin";
+    mark.title = "Pinned to Home";
+    mark.append(svgIcon(ICON_HOME));
     title.append(mark);
   }
   const titleText = document.createElement("span");
@@ -995,6 +1022,7 @@ async function openEditor(id) {
     ? "Stop using as template"
     : "Use as template";
   refreshFolderMenuItem();
+  refreshHomePinItem();
   renderGlossaryControls(note);
   closeFind();
   ui.historyPanel.hidden = true;
@@ -1535,6 +1563,16 @@ function refreshFolderMenuItem() {
   ui.menuFolder.textContent = folder
     ? `Folder: ${folder.name || "Untitled"}`
     : "Move to folder…";
+}
+
+// "Pin to Home" only applies to filed notes (unfiled ones are already on Home).
+function refreshHomePinItem() {
+  const note = notes[currentId];
+  const filed = note && note.folderId;
+  ui.menuHomepin.hidden = !filed;
+  if (filed) {
+    ui.menuHomepin.textContent = note.homePinned ? "Unpin from Home" : "Pin to Home";
+  }
 }
 
 function openFolderPicker(bulk = false) {
@@ -2784,8 +2822,18 @@ ui.more.addEventListener("click", (event) => {
   event.stopPropagation();
   refreshSiteMenuItem();
   refreshFolderMenuItem();
+  refreshHomePinItem();
   refreshReminderMenuItem();
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
+});
+
+ui.menuHomepin.addEventListener("click", async () => {
+  const note = notes[currentId];
+  note.homePinned = !note.homePinned;
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  refreshHomePinItem();
+  ui.moreMenu.hidden = true;
 });
 
 ui.menuFolder.addEventListener("click", () => openFolderPicker());
