@@ -423,9 +423,11 @@ paging through pages of notes.
 Two independent pin behaviors, so a filed note can be surfaced without leaving
 its folder:
 
-- **Pin to top of the list** — the existing star (`pinned`). Inside a folder it
-  pins the note to the folder's top; on Home (for unfiled notes) it pins to the
-  Home top. No change — it already covered the "pin to top of folder" case.
+- **Pin to top of the list** — the star (`pinned`), mirrored by an explicit
+  **⋯ → "Pin to top of folder"** item (labelled "Pin to top" for unfiled notes)
+  so the folder-pin is as discoverable as the Home-pin. Inside a folder it pins
+  the note to the folder's top; on Home (unfiled notes) it pins to the Home top.
+  The star and the menu item share one `togglePin()` and stay in sync.
 - **Pin to Home** — a new per-note flag `homePinned` (⋯ menu, shown only for
   filed notes). A home-pinned note appears on Home **at the top** *and* stays in
   its folder (shown with its folder chip and a small home marker). `renderList`

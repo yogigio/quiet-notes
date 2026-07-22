@@ -144,6 +144,7 @@ const ui = {
   selMove: $("sel-move"),
   selDelete: $("sel-delete"),
   menuFolder: $("menu-folder"),
+  menuPin: $("menu-pin"),
   menuHomepin: $("menu-homepin"),
   menuReminder: $("menu-reminder"),
   reminderSheet: $("reminder-sheet"),
@@ -1022,6 +1023,7 @@ async function openEditor(id) {
     ? "Stop using as template"
     : "Use as template";
   refreshFolderMenuItem();
+  refreshPinItem();
   refreshHomePinItem();
   renderGlossaryControls(note);
   closeFind();
@@ -1563,6 +1565,25 @@ function refreshFolderMenuItem() {
   ui.menuFolder.textContent = folder
     ? `Folder: ${folder.name || "Untitled"}`
     : "Move to folder…";
+}
+
+// The star and this menu item both toggle `pinned`; the label names the list
+// the note would pin to (its folder when filed, otherwise Home).
+function refreshPinItem() {
+  const note = notes[currentId];
+  if (!note) return;
+  const filed = Boolean(note.folderId);
+  if (note.pinned) ui.menuPin.textContent = filed ? "Unpin from folder top" : "Unpin from top";
+  else ui.menuPin.textContent = filed ? "Pin to top of folder" : "Pin to top";
+}
+
+async function togglePin() {
+  const note = notes[currentId];
+  note.pinned = !note.pinned;
+  note.updatedAt = Date.now();
+  await saveNote(note);
+  ui.pin.classList.toggle("pinned", note.pinned);
+  refreshPinItem();
 }
 
 // "Pin to Home" only applies to filed notes (unfiled ones are already on Home).
@@ -2822,9 +2843,15 @@ ui.more.addEventListener("click", (event) => {
   event.stopPropagation();
   refreshSiteMenuItem();
   refreshFolderMenuItem();
+  refreshPinItem();
   refreshHomePinItem();
   refreshReminderMenuItem();
   ui.moreMenu.hidden = !ui.moreMenu.hidden;
+});
+
+ui.menuPin.addEventListener("click", async () => {
+  await togglePin();
+  ui.moreMenu.hidden = true;
 });
 
 ui.menuHomepin.addEventListener("click", async () => {
@@ -3073,13 +3100,7 @@ ui.glossary.addEventListener("click", async () => {
   setMode(mode); // refresh toolbar/hint visibility and preview content
 });
 
-ui.pin.addEventListener("click", async () => {
-  const note = notes[currentId];
-  note.pinned = !note.pinned;
-  note.updatedAt = Date.now();
-  await saveNote(note);
-  ui.pin.classList.toggle("pinned", note.pinned);
-});
+ui.pin.addEventListener("click", togglePin);
 
 ui.menuCopy.addEventListener("click", async () => {
   await navigator.clipboard.writeText(ui.editor.value);
