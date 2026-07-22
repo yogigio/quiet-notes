@@ -46,6 +46,9 @@ opt in to sync through your own Firefox account (end-to-end encrypted).
   what starting one does to another that's running (pause it — the default —,
   save it, or keep both running). Local-only, but included in export/import
   for your billing records
+- **Timers overview**: the ☰ menu's **Timers** view shows every running or
+  paused timer (and the countdown) in one place — live times, pause/resume, and
+  one tap to jump to the note — so you never hunt through notes to find them
 - **Countdown & Pomodoro**: the timer has a Countdown tab with presets and a
   Pomodoro mode (25/5, auto-cycling) that notifies you when time's up — even
   if the sidebar is closed

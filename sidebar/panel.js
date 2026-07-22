@@ -33,6 +33,7 @@ const ui = {
   topbar: $("topbar"),
   menuToggle: $("menu-toggle"),
   mainMenu: $("main-menu"),
+  mmTimers: $("mm-timers"),
   mmAgenda: $("mm-agenda"),
   mmFolder: $("mm-folder"),
   mmSettings: $("mm-settings"),
@@ -118,6 +119,9 @@ const ui = {
   agendaView: $("agenda-view"),
   agendaBack: $("agenda-back"),
   agendaBody: $("agenda-body"),
+  timersView: $("timers-view"),
+  timersBack: $("timers-back"),
+  timersBody: $("timers-body"),
   syncToggle: $("sync-toggle"),
   quota: $("quota"),
   quotaFill: $("quota-fill"),
@@ -276,6 +280,8 @@ const ICON_TPL =
 const ICON_CHEVRON = "M6.5 3.5 11 8l-4.5 4.5";
 const ICON_BACK = "M10 3.5 5.5 8l4.5 4.5";
 const ICON_HOME = "M2.7 7.8 8 3.3l5.3 4.5M4.3 6.7v5.8h7.4V6.7";
+const ICON_PLAY = "M5.5 3.5 12 8l-6.5 4.5z";
+const ICON_PAUSE = "M5 3.5h1.8v9H5z M9.2 3.5H11v9H9.2z";
 
 function svgIcon(pathData, filled) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -973,6 +979,7 @@ function showView(view) {
   ui.editorView.hidden = view !== "editor";
   ui.settingsView.hidden = view !== "settings";
   ui.agendaView.hidden = view !== "agenda";
+  ui.timersView.hidden = view !== "timers";
   closeMenus();
 }
 
@@ -2081,6 +2088,7 @@ function paintTimer() {
   if (countdown && countdown.running && !ui.timerPanel.hidden && timerTab === "countdown") {
     ui.cdDisplay.textContent = formatClock(countdownRemaining());
   }
+  if (!ui.timersView.hidden) paintTimersView();
   renderTimerChip();
 }
 
@@ -2123,6 +2131,7 @@ async function persistTimers() {
   await saveTimers(timers);
   await refreshFolderTimes();
   ensureTick();
+  if (!ui.timersView.hidden) renderTimers();
 }
 
 // Pause (park) a note's timer in place, keeping its accumulated time.
@@ -2430,6 +2439,7 @@ function countdownRemaining() {
 async function persistCountdown() {
   await saveCountdown(countdown);
   ensureTick();
+  if (!ui.timersView.hidden) renderTimers();
 }
 
 async function startCountdown() {
@@ -2560,6 +2570,149 @@ function switchTimerTab(tab) {
   ui.timerCountdown.hidden = sw;
   if (sw) renderTimer();
   else renderCountdown();
+}
+
+// ---- Timers overview (all active timers, from the hamburger menu) ----
+
+// Pause/resume a specific note's stopwatch from the overview (resume respects
+// the timer mode, like starting from the panel does).
+async function pauseTimerFor(id) {
+  if (!isRunning(timers[id])) return;
+  parkTimer(id);
+  await persistTimers();
+  if (id === currentId && !ui.timerPanel.hidden) renderTimer();
+}
+
+async function resumeTimerFor(id) {
+  const mode = timerMode();
+  if (mode === "single") {
+    for (const [oid] of otherTimers(id)) await commitTimer(oid);
+  } else if (mode === "per-note") {
+    for (const [oid, t] of otherTimers(id)) if (t.runningSince) parkTimer(oid);
+  }
+  const t = timers[id];
+  if (t && !t.runningSince) t.runningSince = Date.now();
+  await persistTimers();
+  if (id === currentId && !ui.timerPanel.hidden) renderTimer();
+}
+
+function activeTimerCount() {
+  return Object.keys(timers).length + (countdownActive() ? 1 : 0);
+}
+
+function openTimers() {
+  closeMenus();
+  currentId = null;
+  showView("timers");
+  renderTimers();
+}
+
+// Open a note and drop straight into its time tracker on the given tab.
+async function openNoteTimer(id, tab) {
+  await openEditor(id);
+  timerTab = tab;
+  openTimer();
+}
+
+function timerRowMarkup(opts) {
+  const row = document.createElement("div");
+  row.className = "timer-row" + (opts.countdown ? " cd" : "");
+  if (opts.countdown) row.dataset.cd = "1";
+  else row.dataset.note = opts.noteId;
+
+  const toggle = document.createElement("button");
+  toggle.className = "tr-toggle";
+  toggle.title = opts.running ? "Pause" : "Resume";
+  toggle.append(svgIcon(opts.running ? ICON_PAUSE : ICON_PLAY, true));
+  toggle.classList.toggle("running", opts.running);
+  toggle.addEventListener("click", opts.onToggle);
+
+  const open = document.createElement("button");
+  open.className = "tr-open";
+  const title = document.createElement("span");
+  title.className = "tr-title";
+  title.textContent = opts.title;
+  const time = document.createElement("span");
+  time.className = "tr-time";
+  time.textContent = opts.time;
+  open.append(title, time);
+  open.addEventListener("click", opts.onOpen);
+
+  row.append(toggle, open);
+  return row;
+}
+
+function renderTimers() {
+  ui.timersBody.textContent = "";
+  const entries = Object.entries(timers).filter(
+    ([noteId]) => notes[noteId] && !notes[noteId].deletedAt
+  );
+  const cdActive = countdownActive();
+  if (!entries.length && !cdActive) {
+    const p = document.createElement("p");
+    p.className = "hint agenda-empty";
+    p.textContent = "No active timers. Start one from a note’s ⏱ time tracker.";
+    ui.timersBody.append(p);
+    return;
+  }
+
+  if (cdActive) {
+    const running = Boolean(countdown && countdown.running);
+    const label = countdown.pomodoro
+      ? countdown.phase === "focus"
+        ? "Countdown · Focus"
+        : "Countdown · Break"
+      : "Countdown";
+    ui.timersBody.append(
+      timerRowMarkup({
+        countdown: true,
+        running,
+        title: label,
+        time: formatClock(countdownRemaining()),
+        onToggle: () => (running ? pauseCountdown() : startCountdown()),
+        onOpen: () => {
+          if (countdown && countdown.noteId && notes[countdown.noteId]) {
+            openNoteTimer(countdown.noteId, "countdown");
+          }
+        },
+      })
+    );
+  }
+
+  // Stopwatch timers: running first, then longest-elapsed first.
+  entries.sort((a, b) => {
+    const ra = isRunning(a[1]) ? 1 : 0;
+    const rb = isRunning(b[1]) ? 1 : 0;
+    if (ra !== rb) return rb - ra;
+    return timerElapsed(b[1]) - timerElapsed(a[1]);
+  });
+  for (const [noteId, t] of entries) {
+    const running = isRunning(t);
+    ui.timersBody.append(
+      timerRowMarkup({
+        noteId,
+        running,
+        title: titleOf(notes[noteId]),
+        time: formatClock(timerElapsed(t)),
+        onToggle: () => (running ? pauseTimerFor(noteId) : resumeTimerFor(noteId)),
+        onOpen: () => openNoteTimer(noteId, "stopwatch"),
+      })
+    );
+  }
+}
+
+// Cheap per-second update of just the live time labels (no rebuild).
+function paintTimersView() {
+  for (const row of ui.timersBody.querySelectorAll(".timer-row")) {
+    const timeEl = row.querySelector(".tr-time");
+    if (!timeEl) continue;
+    if (row.dataset.cd) {
+      if (countdown) timeEl.textContent = formatClock(countdownRemaining());
+    } else {
+      const t = timers[row.dataset.note];
+      if (t) timeEl.textContent = formatClock(timerElapsed(t));
+    }
+  }
 }
 
 // ---- Reminders (per-note due dates; a note may have several) ----
@@ -2995,8 +3148,11 @@ ui.menuToggle.addEventListener("click", (event) => {
   event.stopPropagation();
   const open = ui.mainMenu.hidden;
   closeMenus();
+  const n = activeTimerCount();
+  ui.mmTimers.textContent = n ? `Timers (${n})` : "Timers";
   ui.mainMenu.hidden = !open;
 });
+ui.mmTimers.addEventListener("click", openTimers);
 ui.mmAgenda.addEventListener("click", openAgenda);
 ui.mmFolder.addEventListener("click", () => {
   closeMenus();
@@ -3018,6 +3174,7 @@ ui.back.addEventListener("click", async () => {
 });
 ui.settingsBack.addEventListener("click", openList);
 ui.agendaBack.addEventListener("click", openList);
+ui.timersBack.addEventListener("click", openList);
 
 ui.modeWrite.addEventListener("click", () => {
   setMode("write");
@@ -3088,7 +3245,7 @@ document.addEventListener("keydown", (event) => {
     exitSelection();
   } else if (!ui.editorView.hidden) {
     ui.back.click();
-  } else if (!ui.settingsView.hidden || !ui.agendaView.hidden) {
+  } else if (!ui.settingsView.hidden || !ui.agendaView.hidden || !ui.timersView.hidden) {
     openList();
   }
 });

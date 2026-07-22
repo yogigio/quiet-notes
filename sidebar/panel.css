@@ -1177,8 +1177,8 @@ body.mono #preview {
 
 /* ---- Agenda / Upcoming view ---- */
 
-#agenda-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-#agenda-bar {
+#agenda-view, #timers-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#agenda-bar, #timers-bar {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1186,7 +1186,50 @@ body.mono #preview {
   border-bottom: 1px solid var(--border);
 }
 #agenda-body { flex: 1; overflow-y: auto; padding: 6px 8px 12px; }
+#timers-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .agenda-empty { margin-top: 30%; text-align: center; }
+
+/* Timer rows: a round pause/resume control + a click-to-open card. */
+.timer-row { display: flex; align-items: center; gap: 8px; }
+.tr-toggle {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tr-toggle svg { width: 13px; height: 13px; }
+.tr-toggle:hover { background: var(--hover); color: var(--text); }
+.tr-toggle.running { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.tr-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  text-align: left;
+}
+.tr-open:hover { background: var(--hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.tr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: plaintext; }
+.tr-time { flex: none; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.timer-row.cd .tr-title { color: var(--accent); font-weight: 500; }
+.timer-row.cd .tr-time { color: var(--accent); }
 .agenda-head {
   padding: 12px 4px 4px;
   color: var(--text-dim);

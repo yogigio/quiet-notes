@@ -450,7 +450,19 @@ its folder:
   box or pressing next/prev scrolls. Previously every keystroke re-ran
   `gotoMatch(0)`, yanking the view to match #1.
 
-### v1.0 — release
+### v0.14 — timers overview (shipped)
+
+A **Timers** view (top-row ☰ menu, labelled `Timers (N)` when any are active)
+so every running/paused timer is visible in one place without opening each
+note. Lists the countdown/Pomodoro first (when active), then stopwatch timers
+sorted running-first then longest-elapsed. Each row has a round pause/resume
+control and a card that opens the note straight on its tracker tab
+(`openNoteTimer`). Live times update via the existing 1 s tick
+(`paintTimersView` updates just the labels; `renderTimers` rebuilds on state
+changes, called from `persistTimers`/`persistCountdown`). Resuming from the
+overview respects the timer mode (`resumeTimerFor` parks/commits others like
+`startTimer`). Read from the same local-only `timers`/`countdown` state — no
+new storage.
 
 - UI localization via `_locales` (English, Georgian, …)
 - AMO listing: screenshots, privacy statement ("no data collected — see
