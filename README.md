@@ -68,6 +68,33 @@ Tip: to show the sidebar on the right, use Firefox Settings → General →
 Browser Layout → "Show sidebar on the right". Sidebar position is a
 browser-level setting extensions cannot (and should not) change.
 
+## Web app (PWA)
+
+The same notes app also runs as an installable, offline-capable web app — no
+server, no account. It **reuses the extension's own files** (`sidebar/panel.*`,
+`background.js`) rather than duplicating them; `web/platform.js` implements the
+slice of the WebExtension APIs they use on top of web standards:
+
+| Extension API | Web replacement |
+| --- | --- |
+| `storage.local` | IndexedDB |
+| `storage.onChanged` | BroadcastChannel (cross-tab) + local dispatch |
+| `alarms` | stored due-times checked once a second |
+| `notifications` | the Notifications API |
+| `menus`, `commands`, `tabs`, `storage.sync` | not available on the web — inert |
+
+Run it locally with any static server from the repo root, then open `/`:
+
+```
+python -m http.server 8000
+```
+
+Differences from the extension: no Firefox Sync and no site notes (both need
+extension APIs, so their settings are hidden), and reminders/countdowns fire
+while a tab is open — on load the app catches up anything that came due while
+it was closed. Sync plans and trade-offs are recorded in
+[docs/SYNC.md](docs/SYNC.md).
+
 ## Principles
 
 1. **Local-first.** `browser.storage.local` is the single source of truth.

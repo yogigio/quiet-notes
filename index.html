@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Quiet Notes</title>
+  <meta name="description" content="Private, local-first notes. No servers, no accounts, no tracking.">
+  <meta name="theme-color" content="#5b5ef4">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/note.svg" type="image/svg+xml">
+  <!-- The extension's own stylesheet, reused verbatim. -->
+  <link rel="stylesheet" href="sidebar/panel.css">
+  <style>
+    /* The sidebar is ~320px wide; on a full page keep the app a comfortable
+       column instead of stretching note text across a wide monitor. */
+    body { max-width: 900px; margin: 0 auto; box-shadow: var(--shadow); }
+    .boot-error { padding: 24px; text-align: center; color: var(--danger); }
+  </style>
+  <!-- Defines window.browser before any module runs. -->
+  <script src="web/platform.js"></script>
+</head>
+<body>
+  <script type="module" src="web/app.js"></script>
+</body>
+</html>
