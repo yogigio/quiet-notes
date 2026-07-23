@@ -46,11 +46,19 @@ plumbing differs.
 1. **The extension keeps Firefox Sync unchanged.** No reason to replace it.
 2. **The web app ships local-only first**, with the existing JSON
    export/import as the bridge. It is honest, server-free, and unblocks the app.
-3. **File-based sync is the intended "real" sync** for the web app: the user
-   picks a folder inside whatever they already sync (Dropbox, OneDrive,
-   Syncthing, iCloud); the app reads it on load and writes debounced on change.
-   It is the only automatic option that adds **zero servers** and leaves the
-   user owning the file.
+3. **File-based sync** — *shipped*, see `web/filesync.js`. The user picks one
+   `quiet-notes.json` inside whatever folder they already sync (Dropbox,
+   OneDrive, Syncthing, iCloud); the app pulls-and-merges on load and pushes
+   debounced (1.5 s) on change. It is the only automatic option that adds
+   **zero servers** and leaves the user owning the file.
+   - The file handle is kept in its own IndexedDB (`quiet-notes-sync`) so it
+     survives reloads. Browsers drop the *permission* on restart and only allow
+     re-granting from a user gesture, so on load we merely `queryPermission`
+     and, if needed, show a **Reconnect** button.
+   - Pushes use `buildBackup({ includeTrashed: true })` so a deletion on one
+     device propagates instead of being resurrected by another device's copy.
+   - An `applying` flag suppresses the push that a pull's own writes would
+     otherwise trigger.
    - Limitation: the File System Access API is Chromium-desktop-only. Firefox
      and Safari fall back to manual export/import — acceptable, because Firefox
      users have the extension (with Firefox Sync), so the two products

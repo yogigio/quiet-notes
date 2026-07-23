@@ -44,8 +44,14 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Cache-first for the shell: the app is static, and this keeps it instant and
-// fully usable offline. A new CACHE name on release pulls fresh files.
+// Network-first, falling back to the cache.
+//
+// Deliberately not cache-first: there is no build step, so filenames are never
+// hashed and a cache-first worker would happily serve a stale app forever
+// (exactly what happened during development). Network-first keeps the app
+// always up to date when online while the cache still makes it fully usable
+// offline — and for static files served from a CDN the latency cost is
+// negligible.
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -53,17 +59,23 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(request).then((hit) => {
-      if (hit) return hit;
-      return fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match("index.html"));
-    })
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(async () => {
+        const hit = await caches.match(request);
+        if (hit) return hit;
+        // A navigation that missed the cache still gets the app shell.
+        if (request.mode === "navigate") {
+          const shell = await caches.match("index.html");
+          if (shell) return shell;
+        }
+        throw new Error("offline and not cached");
+      })
   );
 });

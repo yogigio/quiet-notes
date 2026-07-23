@@ -1,6 +1,6 @@
 {
   "name": "quiet-notes",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "private": true,
   "description": "Private, local-first notes — a Firefox sidebar extension and a PWA sharing one codebase.",
   "homepage": "https://github.com/yogigio/quiet-notes",

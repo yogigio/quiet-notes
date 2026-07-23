@@ -3,7 +3,6 @@ import {
   loadNotes,
   saveNote,
   deleteNote,
-  importNotes,
   onExternalChange,
   loadSettings,
   saveSettings,
@@ -33,6 +32,7 @@ import {
   onStorageChange,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
+import { buildBackup, applyBackup } from "./backup.js";
 import {
   ICON_PIN,
   ICON_BOOK,
@@ -1606,21 +1606,7 @@ function download(content, type, filename) {
 }
 
 async function exportAll() {
-  // Time sessions live outside the note record, so pull them in for backup.
-  const allTime = await loadAllTimeEntries();
-  const time = {};
-  for (const note of sortedNotes()) {
-    if (allTime[note.id] && allTime[note.id].length) time[note.id] = allTime[note.id];
-  }
-  const payload = {
-    app: "quiet-notes",
-    format: 1,
-    exportedAt: new Date().toISOString(),
-    notes: sortedNotes(),
-    folders: Object.values(folders),
-    time,
-    reminders,
-  };
+  const payload = await buildBackup();
   download(
     JSON.stringify(payload, null, 2),
     "application/json",
@@ -1647,44 +1633,12 @@ function exportMarkdown() {
 
 async function importFromFile(file) {
   try {
-    const payload = JSON.parse(await file.text());
-    if (!Array.isArray(payload.notes)) throw new Error("no notes array");
-    const { added, updated } = await importNotes(payload.notes);
-    if (Array.isArray(payload.folders)) {
-      for (const folder of payload.folders) {
-        const existing = folders[folder.id];
-        if (!existing || folder.updatedAt > existing.updatedAt) await saveFolder(folder);
-      }
-    }
-    // Merge time sessions, de-duplicated by their start timestamp so a
-    // re-import never doubles logged hours.
-    if (payload.time && typeof payload.time === "object") {
-      for (const [noteId, incoming] of Object.entries(payload.time)) {
-        if (!Array.isArray(incoming) || !incoming.length) continue;
-        const current = await loadTimeEntries(noteId);
-        const seen = new Set(current.map((e) => e.start));
-        const merged = current.concat(incoming.filter((e) => !seen.has(e.start)));
-        merged.sort((a, b) => (a.start || 0) - (b.start || 0));
-        await saveTimeEntries(noteId, merged);
-      }
-    }
-    // Merge reminders: union each note's reminders, de-duplicated by time so a
-    // re-import never doubles them. Handles both the array and legacy shapes.
-    if (payload.reminders && typeof payload.reminders === "object") {
-      const merged = { ...reminders };
-      for (const [noteId, entry] of Object.entries(payload.reminders)) {
-        const incoming = normalizeReminderEntry(entry);
-        if (!incoming.length) continue;
-        const current = merged[noteId] || [];
-        const times = new Set(current.map((r) => r.at));
-        merged[noteId] = current.concat(
-          incoming.filter((r) => !times.has(r.at)).map((r) => ({ id: crypto.randomUUID(), at: r.at }))
-        );
-      }
-      reminders = merged;
-      await saveReminders(reminders);
-    }
-    [notes, folders] = await Promise.all([loadNotes(), loadFolders()]);
+    const { added, updated } = await applyBackup(JSON.parse(await file.text()));
+    [notes, folders, reminders] = await Promise.all([
+      loadNotes(),
+      loadFolders(),
+      loadReminders(),
+    ]);
     if (currentId) timeEntries = await loadTimeEntries(currentId);
     await refreshFolderTimes();
     renderList();

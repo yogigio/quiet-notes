@@ -11,4 +11,10 @@ interface Window {
   browser: any;
   /** Set by web/platform.js so the bootstrap can flush overdue alarms. */
   __quietNotesCatchUp?: () => void;
+
+  // File System Access API — not in TypeScript's default DOM lib. Declared as
+  // always present because callers feature-detect first (filesync.isSupported).
+  showSaveFilePicker(options?: any): Promise<any>;
+  showOpenFilePicker(options?: any): Promise<any[]>;
+  showDirectoryPicker(options?: any): Promise<any>;
 }

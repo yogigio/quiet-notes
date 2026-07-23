@@ -89,10 +89,17 @@ Run it locally with any static server from the repo root, then open `/`:
 python -m http.server 8000
 ```
 
+**Sync file.** Instead of Firefox Sync, the web app can keep a
+`quiet-notes.json` in a folder you already sync (Dropbox, OneDrive,
+Syncthing…): Settings → **Sync file** → *Choose sync file…*. It merges both
+ways — notes and folders by recency, time entries and reminders by union — so
+no server is ever involved. Needs the File System Access API (Chrome, Edge or
+Opera on desktop); elsewhere the section explains the Export/Import fallback.
+
 Differences from the extension: no Firefox Sync and no site notes (both need
 extension APIs, so their settings are hidden), and reminders/countdowns fire
 while a tab is open — on load the app catches up anything that came due while
-it was closed. Sync plans and trade-offs are recorded in
+it was closed. Sync design and trade-offs are recorded in
 [docs/SYNC.md](docs/SYNC.md).
 
 ## Principles
