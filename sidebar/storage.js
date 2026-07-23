@@ -1,3 +1,7 @@
+// @ts-check
+/** @typedef {import("./util.js").Note} Note */
+/** @typedef {import("./util.js").Timer} Timer */
+/** @typedef {import("./util.js").TimeEntry} TimeEntry */
 // Persistence layer. Every note lives in browser.storage.local under its own
 // key ("note:<id>") so a future sync mirror can copy notes individually
 // without touching unrelated data. storage.local never leaves this machine.
@@ -50,8 +54,10 @@ export function newFolder() {
   };
 }
 
+/** @returns {Promise<Record<string, any>>} every folder by id */
 export async function loadFolders() {
   const everything = await browser.storage.local.get(null);
+  /** @type {Record<string, any>} */
   const folders = {};
   for (const [key, value] of Object.entries(everything)) {
     if (key.startsWith(FOLDER_PREFIX)) folders[value.id] = value;
@@ -59,36 +65,44 @@ export async function loadFolders() {
   return folders;
 }
 
+/** @param {{id: string}} folder */
 export async function saveFolder(folder) {
   await browser.storage.local.set({ [FOLDER_PREFIX + folder.id]: folder });
 }
 
+/** @param {string} id */
 export async function deleteFolder(id) {
   await browser.storage.local.remove(FOLDER_PREFIX + id);
 }
 
 // Per-note last-used view mode ("write"/"preview"). Local-only and kept out
 // of the note record so toggling a view never bumps updatedAt or syncs.
+/** @returns {Promise<Record<string, "write"|"preview">>} */
 export async function loadViewModes() {
   const { viewModes } = await browser.storage.local.get("viewModes");
   return viewModes || {};
 }
 
+/** @param {Record<string, string>} viewModes */
 export async function saveViewModes(viewModes) {
   await browser.storage.local.set({ viewModes });
 }
 
+/** @returns {Promise<Record<string, any>>} */
 export async function loadSettings() {
   const { settings } = await browser.storage.local.get("settings");
   return settings || { syncEnabled: false };
 }
 
+/** @param {Record<string, any>} settings */
 export async function saveSettings(settings) {
   await browser.storage.local.set({ settings });
 }
 
+/** @returns {Promise<Record<string, Note>>} every live note by id */
 export async function loadNotes() {
   const everything = await browser.storage.local.get(null);
+  /** @type {Record<string, any>} */
   const notes = {};
   for (const [key, value] of Object.entries(everything)) {
     if (key.startsWith(PREFIX)) notes[value.id] = value;
@@ -96,10 +110,12 @@ export async function loadNotes() {
   return notes;
 }
 
+/** @param {Note} note */
 export async function saveNote(note) {
   await browser.storage.local.set({ [PREFIX + note.id]: note });
 }
 
+/** Removes the note and its local-only history/time entries. @param {string} id */
 export async function deleteNote(id) {
   await browser.storage.local.remove([
     PREFIX + id,
@@ -110,12 +126,14 @@ export async function deleteNote(id) {
 
 // ---- Time tracking (local-only, but exported for backup) ----
 
+/** @param {string} id @returns {Promise<TimeEntry[]>} */
 export async function loadTimeEntries(id) {
   const key = TIME_PREFIX + id;
   const got = await browser.storage.local.get(key);
   return got[key] || [];
 }
 
+/** @param {string} id @param {TimeEntry[]} entries */
 export async function saveTimeEntries(id, entries) {
   const key = TIME_PREFIX + id;
   if (entries && entries.length) {
@@ -127,8 +145,10 @@ export async function saveTimeEntries(id, entries) {
 
 // Every note's entries at once, as { noteId: entries[] } — used for folder
 // (project) totals and for JSON export.
+/** @returns {Promise<Record<string, TimeEntry[]>>} */
 export async function loadAllTimeEntries() {
   const everything = await browser.storage.local.get(null);
+  /** @type {Record<string, any>} */
   const out = {};
   for (const [key, value] of Object.entries(everything)) {
     if (key.startsWith(TIME_PREFIX)) out[key.slice(TIME_PREFIX.length)] = value;
@@ -140,6 +160,7 @@ export async function loadAllTimeEntries() {
 // timer's runningSince is a Date.now() timestamp while running, or null while
 // paused; elapsed = accumulatedMs + (runningSince ? Date.now() - runningSince
 // : 0). Depending on the chosen mode there may be one or several entries.
+/** @returns {Promise<Record<string, Timer>>} */
 export async function loadTimers() {
   const got = await browser.storage.local.get([TIMERS_KEY, "timer"]);
   const map = got[TIMERS_KEY] && typeof got[TIMERS_KEY] === "object" ? got[TIMERS_KEY] : {};
@@ -158,6 +179,7 @@ export async function loadTimers() {
   return map;
 }
 
+/** @param {Record<string, Timer>} timers */
 export async function saveTimers(timers) {
   if (timers && Object.keys(timers).length) {
     await browser.storage.local.set({ [TIMERS_KEY]: timers });
@@ -168,11 +190,13 @@ export async function saveTimers(timers) {
 
 // ---- Countdown / Pomodoro (single, local-only) ----
 // The background script schedules the alarm/notification from this state.
+/** @returns {Promise<any|null>} */
 export async function loadCountdown() {
   const { countdown } = await browser.storage.local.get("countdown");
   return countdown || null;
 }
 
+/** @param {any|null} countdown */
 export async function saveCountdown(countdown) {
   if (countdown) await browser.storage.local.set({ countdown });
   else await browser.storage.local.remove("countdown");
@@ -182,11 +206,13 @@ export async function saveCountdown(countdown) {
 // A { noteId: { at } } map under the single "reminders" key. Local-only so it
 // never bumps note.updatedAt or syncs (which would risk double-firing across
 // devices); included in JSON export for backup. The background fires them.
+/** @returns {Promise<Record<string, Array<{id: string, at: number}>>>} */
 export async function loadReminders() {
   const { reminders } = await browser.storage.local.get("reminders");
   return reminders || {};
 }
 
+/** @param {Record<string, Array<{id: string, at: number}>>} reminders */
 export async function saveReminders(reminders) {
   if (reminders && Object.keys(reminders).length) {
     await browser.storage.local.set({ reminders });
@@ -197,6 +223,7 @@ export async function saveReminders(reminders) {
 
 // ---- Version history (local-only) ----
 
+/** @param {string} id @returns {Promise<any[]>} */
 export async function loadHistory(id) {
   const key = HISTORY_PREFIX + id;
   const got = await browser.storage.local.get(key);
@@ -204,6 +231,7 @@ export async function loadHistory(id) {
 }
 
 // Append a snapshot (newest last), trimming to the most recent HISTORY_LIMIT.
+/** @param {string} id @param {any} snapshot */
 export async function pushHistory(id, snapshot) {
   const history = await loadHistory(id);
   history.push(snapshot);
@@ -214,6 +242,7 @@ export async function pushHistory(id, snapshot) {
 
 // Merge imported notes into storage. A note wins over an existing one with
 // the same id only if it was edited more recently. Returns counts for the UI.
+/** @param {Note[]} imported @returns {Promise<{added: number, updated: number}>} */
 export async function importNotes(imported) {
   const existing = await loadNotes();
   let added = 0;
@@ -231,9 +260,65 @@ export async function importNotes(imported) {
   return { added, updated };
 }
 
+// ---- Transient hand-off flags (local-only) ----
+// The background script drops these for the panel to act on. Kept behind the
+// storage layer so the UI never touches browser.storage directly.
+
+export async function loadQuickCapture() {
+  const { quickCapture } = await browser.storage.local.get("quickCapture");
+  return quickCapture || null;
+}
+
+export async function clearQuickCapture() {
+  await browser.storage.local.remove("quickCapture");
+}
+
+// Read-and-consume: the flag exists only to be acted on once.
+export async function takeOpenNote() {
+  const { openNote } = await browser.storage.local.get("openNote");
+  if (openNote) await browser.storage.local.remove("openNote");
+  return openNote || null;
+}
+
+export async function clearOpenNote() {
+  await browser.storage.local.remove("openNote");
+}
+
+// ---- Sync mirror status ----
+// Extension-only: where storage.sync is unavailable (the web app) this reports
+// an empty mirror rather than throwing.
+
+export async function syncMirrorBytes() {
+  try {
+    const mirror = await browser.storage.sync.get(null);
+    let bytes = 0;
+    for (const [key, value] of Object.entries(mirror)) {
+      bytes += key.length + JSON.stringify(value).length;
+    }
+    return bytes;
+  } catch {
+    return 0;
+  }
+}
+
+export async function loadOversized() {
+  const { oversized } = await browser.storage.local.get("oversized");
+  return oversized || [];
+}
+
+// Raw local-storage change subscription, for state the UI mirrors directly
+// (timers, countdown, reminders, hand-off flags).
+/** @param {(changes: Record<string, any>) => void} callback */
+export function onStorageChange(callback) {
+  browser.storage.onChanged.addListener((/** @type {Record<string, any>} */ changes, /** @type {string} */ area) => {
+    if (area === "local") callback(changes);
+  });
+}
+
 // Notify the UI when another sidebar window (or, later, sync) changes notes.
+/** @param {() => void} callback */
 export function onExternalChange(callback) {
-  browser.storage.onChanged.addListener((changes, area) => {
+  browser.storage.onChanged.addListener((/** @type {Record<string, any>} */ changes, /** @type {string} */ area) => {
     if (area !== "local") return;
     if (
       Object.keys(changes).some(

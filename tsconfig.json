@@ -1,0 +1,23 @@
+{
+  // Type checking only — this never emits anything. The shipped files stay
+  // plain JavaScript with JSDoc annotations, so "no build step" still holds:
+  //   npm install && npm run typecheck
+  //
+  // checkJs is off globally so files opt in one at a time with `// @ts-check`
+  // at the top. panel.js is not annotated yet; it is being converted
+  // incrementally as it is split into modules.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["types/*.d.ts", "sidebar/**/*.js", "web/**/*.js", "background.js", "sw.js"],
+  "exclude": ["node_modules", "sidebar/test-harness.html"]
+}

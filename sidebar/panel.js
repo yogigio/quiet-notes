@@ -24,8 +24,49 @@ import {
   saveCountdown,
   loadReminders,
   saveReminders,
+  loadQuickCapture,
+  clearQuickCapture,
+  takeOpenNote,
+  clearOpenNote,
+  syncMirrorBytes,
+  loadOversized,
+  onStorageChange,
 } from "./storage.js";
 import { renderMarkdown } from "./markdown.js";
+import {
+  ICON_PIN,
+  ICON_BOOK,
+  ICON_TPL,
+  ICON_CHEVRON,
+  ICON_BACK,
+  ICON_HOME,
+  ICON_PLAY,
+  ICON_PAUSE,
+  svgIcon,
+  FOLDER_COLORS,
+  FOLDER_EMOJI,
+  colorHex,
+  titleOf,
+  snippetOf,
+  wordCount,
+  matchesQuery,
+  pinnedOnHome,
+  escapeForHtml,
+  listMarker,
+  parseGlossary,
+  formatClock,
+  formatTotal,
+  relativeTime,
+  timerElapsed,
+  isRunning,
+  entriesTotalMs,
+  entryWhen,
+  normalizeReminderEntry,
+  toLocalInput,
+  formatReminder,
+  formatReminderFull,
+  agendaWhen,
+} from "./util.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -240,25 +281,6 @@ const LIST_BATCH = 50; // cards rendered per batch in the note list
 const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const FONT_SIZES = { s: "13px", m: "14.5px", l: "16.5px" };
 
-// Curated modern palette (readable on light and dark as an accent/dot).
-const FOLDER_COLORS = {
-  gray: "#6b7280",
-  red: "#e5484d",
-  orange: "#f76b15",
-  amber: "#f5a623",
-  green: "#30a46c",
-  teal: "#12a594",
-  blue: "#3e63dd",
-  cyan: "#05a2c2",
-  violet: "#6e56cf",
-  pink: "#d6409f",
-};
-const FOLDER_EMOJI = [
-  "📁", "📂", "🗂️", "⭐", "📌", "💼", "📚", "📖",
-  "📝", "🌐", "⚖️", "🗣️", "✏️", "🔖", "🧾", "💡",
-  "🇩🇪", "🇬🇧", "🇺🇸", "🇫🇷", "🇪🇸", "🇮🇹", "🇷🇺", "🇬🇪",
-];
-const colorHex = (key) => FOLDER_COLORS[key] || FOLDER_COLORS.blue;
 // Don't snapshot on every keystroke: keep the version the note had when
 // opened, then at most one snapshot per this interval while editing.
 const SNAPSHOT_MIN_GAP_MS = 2 * 60 * 1000;
@@ -269,57 +291,6 @@ const PLACEHOLDER_GLOSSARY =
   "source term == translation\nanother term == its translation\n\nPlain lines stay plain text.";
 
 // ---- Small helpers ----
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-const ICON_PIN =
-  "M8 2.4l1.7 3.4 3.8.6-2.8 2.7.7 3.8L8 11.1l-3.4 1.8.7-3.8-2.8-2.7 3.8-.6z";
-const ICON_BOOK =
-  "M8 4C6.8 3 5 2.7 3 3v9.5c2-.3 3.8 0 5 1 1.2-1 3-1.3 5-1V3c-2-.3-3.8 0-5 1zm0 0v9.5";
-const ICON_TPL =
-  "M5.5 5.5h7v7h-7z M3 10.5V4.5A1.5 1.5 0 0 1 4.5 3H10";
-const ICON_CHEVRON = "M6.5 3.5 11 8l-4.5 4.5";
-const ICON_BACK = "M10 3.5 5.5 8l4.5 4.5";
-const ICON_HOME = "M2.7 7.8 8 3.3l5.3 4.5M4.3 6.7v5.8h7.4V6.7";
-const ICON_PLAY = "M5.5 3.5 12 8l-6.5 4.5z";
-const ICON_PAUSE = "M5 3.5h1.8v9H5z M9.2 3.5H11v9H9.2z";
-
-function svgIcon(pathData, filled) {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", pathData);
-  if (filled) path.setAttribute("fill", "currentColor");
-  svg.append(path);
-  return svg;
-}
-
-function titleOf(note) {
-  const firstLine = note.body.split("\n").find((line) => line.trim() !== "");
-  return firstLine ? firstLine.trim().replace(/^#+\s*/, "").slice(0, 80) : "Untitled";
-}
-
-function snippetOf(note) {
-  const lines = note.body.split("\n").filter((line) => line.trim() !== "");
-  return lines.length > 1 ? lines[1].trim().slice(0, 100) : "";
-}
-
-function relativeTime(timestamp) {
-  const minutes = Math.round((Date.now() - timestamp) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 7) return `${days} d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-// Whether a note is pinned to the top of the Home list. An unfiled pinned note
-// pins itself there; a filed note pins to Home only via the explicit
-// "Pin to Home" flag (homePinned), which also keeps it in its folder.
-function pinnedOnHome(note) {
-  return Boolean(note.homePinned) || (!note.folderId && Boolean(note.pinned));
-}
 
 function sortedNotes() {
   return Object.values(notes)
@@ -338,18 +309,6 @@ function trashedNotes() {
 
 function templateNotes() {
   return sortedNotes().filter((note) => note.template);
-}
-
-function matchesQuery(note, query) {
-  if (!query) return true;
-  if (query.startsWith("#")) {
-    const tag = query.slice(1);
-    return (note.tags || []).some((t) => t.toLowerCase().includes(tag));
-  }
-  return (
-    note.body.toLowerCase().includes(query) ||
-    (note.site || "").includes(query)
-  );
 }
 
 // ---- Site notes (optional "tabs" permission, hostname only) ----
@@ -888,34 +847,6 @@ async function openByTitle(title) {
   }
 }
 
-// Glossary lines are "source == translation" (or tab-separated, as pasted
-// from a spreadsheet). A single "=" is NOT a separator, since it appears
-// in ordinary text. Lines without a separator stay plain text.
-function parseGlossary(body) {
-  return body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const eq = line.indexOf("==");
-      const tab = line.indexOf("\t");
-      let idx = -1;
-      let len = 0;
-      if (eq !== -1 && (tab === -1 || eq < tab)) {
-        idx = eq;
-        len = 2;
-      } else if (tab !== -1) {
-        idx = tab;
-        len = 1;
-      }
-      if (idx === -1) return { text: line };
-      return {
-        term: line.slice(0, idx).trim(),
-        translation: line.slice(idx + len).trim(),
-      };
-    });
-}
-
 function renderGlossaryTable(container) {
   const rows = parseGlossary(ui.editor.value);
   for (const row of rows) {
@@ -951,10 +882,6 @@ function renderGlossaryControls(note) {
   ui.glossary.classList.toggle("on", Boolean(note.glossary));
   ui.glossary.setAttribute("aria-pressed", String(Boolean(note.glossary)));
   ui.editor.placeholder = note.glossary ? PLACEHOLDER_GLOSSARY : PLACEHOLDER_NOTE;
-}
-
-function wordCount(text) {
-  return text.split(/\s+/).filter(Boolean).length;
 }
 
 function renderCounts() {
@@ -1116,19 +1043,6 @@ function applyLinePrefix(transform) {
   el.selectionEnd = start + replaced.length;
   el.focus();
   notifyEdited();
-}
-
-// If `line` begins a list item, describe its marker: how many characters
-// the marker occupies and what the next item's marker should be. Task
-// items always continue unchecked; numbered items increment.
-function listMarker(line) {
-  let m = line.match(/^(\s*)- \[[ xX]\]\s/);
-  if (m) return { length: m[0].length, next: `${m[1]}- [ ] ` };
-  m = line.match(/^(\s*)([-*])\s/);
-  if (m) return { length: m[0].length, next: `${m[1]}${m[2]} ` };
-  m = line.match(/^(\s*)(\d+)([.)])\s/);
-  if (m) return { length: m[0].length, next: `${m[1]}${Number(m[2]) + 1}${m[3]} ` };
-  return null;
 }
 
 // Enter inside a list item continues the list; Enter on an empty item ends
@@ -1344,17 +1258,13 @@ async function renderSyncStatus() {
   ui.oversizedList.hidden = true;
   if (!settings.syncEnabled) return;
 
-  const mirror = await browser.storage.sync.get(null);
-  let bytes = 0;
-  for (const [key, value] of Object.entries(mirror)) {
-    bytes += key.length + JSON.stringify(value).length;
-  }
+  const bytes = await syncMirrorBytes();
   const percent = Math.min(100, Math.round((bytes / SYNC_QUOTA_BYTES) * 100));
   ui.quotaFill.style.width = `${percent}%`;
   ui.quotaFill.classList.toggle("full", percent > 85);
   ui.quotaText.textContent = `${(bytes / 1024).toFixed(1)} KB of 100 KB sync space used`;
 
-  const { oversized = [] } = await browser.storage.local.get("oversized");
+  const oversized = await loadOversized();
   const titles = oversized
     .filter((id) => notes[id])
     .map((id) => titleOf(notes[id]));
@@ -2015,43 +1925,11 @@ async function restoreSnapshot(snap) {
 // Reset discards it. Elapsed is always derived from timestamps, never from a
 // counter we increment — so a closed sidebar loses nothing.
 
-function timerElapsed(timer) {
-  if (!timer) return 0;
-  const live = timer.runningSince ? Date.now() - timer.runningSince : 0;
-  return timer.accumulatedMs + live;
-}
-
-const isRunning = (timer) => Boolean(timer && timer.runningSince);
 const timerFor = (id) => timers[id] || null;
 const anyRunning = () => Object.values(timers).some(isRunning);
 // Active timers on notes other than the given one, [ [id, timer], … ].
 const otherTimers = (id) => Object.entries(timers).filter(([nid]) => nid !== id);
 const timerMode = () => settings.timerMode || "per-note";
-
-// H:MM:SS for the live clock.
-function formatClock(ms) {
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${h}:${pad(m)}:${pad(s)}`;
-}
-
-// Compact human totals: "2h 15m", "45m", "38s". Used for rollups and the chip.
-function formatTotal(ms) {
-  const total = Math.round(ms / 1000);
-  if (total < 60) return `${total}s`;
-  const h = Math.floor(total / 3600);
-  const m = Math.round((total % 3600) / 60);
-  if (h && m) return `${h}h ${m}m`;
-  if (h) return `${h}h`;
-  return `${m}m`;
-}
-
-function entriesTotalMs(entries) {
-  return entries.reduce((sum, e) => sum + (e.ms || 0), 0);
-}
 
 // Total tracked time for a note = saved sessions + its live timer, if any.
 function noteTotalMs(id, entries) {
@@ -2340,14 +2218,6 @@ function renderTimerEntries() {
       row.append(when, dur, del);
       ui.timerEntries.append(row);
     });
-}
-
-function entryWhen(entry) {
-  const d = new Date(entry.end || entry.start || Date.now());
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return sameDay ? `Today ${time}` : `${d.toLocaleDateString()} ${time}`;
 }
 
 async function deleteEntry(index) {
@@ -2717,15 +2587,6 @@ function paintTimersView() {
 
 // ---- Reminders (per-note due dates; a note may have several) ----
 
-// Each note's reminders are an array of { id, at }. Normalize the legacy
-// single { at } object into that shape.
-function normalizeReminderEntry(entry) {
-  if (!entry) return [];
-  if (Array.isArray(entry)) return entry.filter((r) => r && r.at);
-  if (entry.at) return [{ id: crypto.randomUUID(), at: entry.at }];
-  return [];
-}
-
 function remindersFor(id) {
   return (reminders[id] || []).slice().sort((a, b) => a.at - b.at);
 }
@@ -2739,37 +2600,6 @@ function allReminders() {
     for (const r of arr) out.push({ noteId, id: r.id, at: r.at });
   }
   return out.sort((a, b) => a.at - b.at);
-}
-
-// datetime-local expects "YYYY-MM-DDTHH:MM" in the user's local time.
-function toLocalInput(ts) {
-  const d = new Date(ts);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// Compact due label for the list chip: time if today, "Tmrw HH:MM", else "MMM D".
-function formatReminder(at) {
-  const d = new Date(at);
-  const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const tomorrow = new Date(now);
-  tomorrow.setDate(now.getDate() + 1);
-  if (d.toDateString() === now.toDateString()) return time;
-  if (d.toDateString() === tomorrow.toDateString()) return `Tmrw ${time}`;
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
-}
-
-// Full datetime for the sheet's reminder list rows.
-function formatReminderFull(at) {
-  const d = new Date(at);
-  return d.toLocaleString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function refreshReminderMenuItem() {
@@ -2852,20 +2682,6 @@ function openAgenda() {
   renderAgenda();
 }
 
-// A compact "when" label for an agenda row (the group header carries the day,
-// but This week / Later span days, so include enough context).
-function agendaWhen(at) {
-  const d = new Date(at);
-  const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  if (d.toDateString() === now.toDateString()) return time;
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  if (at < start.getTime() + 7 * 86400000)
-    return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
-}
-
 function renderAgenda() {
   ui.agendaBody.textContent = "";
   const items = allReminders();
@@ -2918,14 +2734,6 @@ function renderAgenda() {
 
 // ---- Print a single note ----
 
-function escapeForHtml(s) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function glossaryToHtml(body) {
   const rows = parseGlossary(body)
     .map((r) =>
@@ -2970,7 +2778,7 @@ function printNote() {
 async function handleQuickCapture(ts) {
   if (!ts || ts <= quickCaptureHandled) return;
   quickCaptureHandled = ts;
-  await browser.storage.local.remove("quickCapture");
+  await clearQuickCapture();
   if (Date.now() - ts < 8000) await createNote();
 }
 
@@ -3526,16 +3334,15 @@ window.addEventListener("blur", flushSave);
 
 // The quick-capture command drops a timestamp the panel reacts to, whether
 // it was already open or just launched.
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.quickCapture && changes.quickCapture.newValue) {
+onStorageChange((changes) => {
+  if (changes.quickCapture && changes.quickCapture.newValue) {
     handleQuickCapture(changes.quickCapture.newValue);
   }
 });
 
 // Keep timers coherent if another sidebar window starts/stops one, or if a
 // note's sessions change elsewhere.
-browser.storage.onChanged.addListener(async (changes, area) => {
-  if (area !== "local") return;
+onStorageChange(async (changes) => {
   if ("timers" in changes) {
     timers = changes.timers.newValue || {};
     await refreshFolderTimes();
@@ -3569,7 +3376,7 @@ browser.storage.onChanged.addListener(async (changes, area) => {
   // A clicked reminder notification asks the panel to open a note.
   if (changes.openNote && changes.openNote.newValue) {
     const id = changes.openNote.newValue;
-    await browser.storage.local.remove("openNote");
+    await clearOpenNote();
     if (notes[id]) openEditor(id);
   }
 });
@@ -3653,13 +3460,10 @@ onExternalChange(async () => {
     if (note.deletedAt && note.deletedAt < cutoff) await purgeNote(note.id);
   }
   // If the sidebar was just launched by the quick-capture command, act on it.
-  const { quickCapture } = await browser.storage.local.get("quickCapture");
+  const quickCapture = await loadQuickCapture();
   if (quickCapture) await handleQuickCapture(quickCapture);
   // If a reminder notification was clicked while the sidebar was closed, open
   // the note it points at.
-  const { openNote } = await browser.storage.local.get("openNote");
-  if (openNote) {
-    await browser.storage.local.remove("openNote");
-    if (notes[openNote]) await openEditor(openNote);
-  }
+  const openNote = await takeOpenNote();
+  if (openNote && notes[openNote]) await openEditor(openNote);
 })();
